@@ -7,6 +7,7 @@ class VideoTile extends StatelessWidget {
   final VoidCallback onPlay;
   final VoidCallback onStream;
   final VoidCallback onDelete;
+  final VoidCallback? onAddToPlaylist;
 
   const VideoTile({
     super.key,
@@ -15,6 +16,7 @@ class VideoTile extends StatelessWidget {
     required this.onPlay,
     required this.onStream,
     required this.onDelete,
+    this.onAddToPlaylist,
   });
 
   String _formatFileSize(int bytes) {
@@ -91,6 +93,15 @@ class VideoTile extends StatelessWidget {
               // Actions
               Column(
                 children: [
+                  if (onAddToPlaylist != null)
+                    IconButton(
+                      icon: Icon(
+                        Icons.playlist_add,
+                        color: theme.colorScheme.secondary,
+                      ),
+                      onPressed: onAddToPlaylist,
+                      tooltip: 'Add to Playlist',
+                    ),
                   IconButton(
                     icon: Icon(Icons.cast, color: theme.colorScheme.secondary),
                     onPressed: onStream,

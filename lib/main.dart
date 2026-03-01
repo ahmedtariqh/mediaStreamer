@@ -4,10 +4,10 @@ import 'package:media_kit/media_kit.dart';
 import 'package:receive_sharing_intent/receive_sharing_intent.dart';
 import 'app_theme.dart';
 import 'screens/home_screen.dart';
-import 'screens/downloads_screen.dart';
-import 'screens/notes_screen.dart';
-import 'screens/stream_screen.dart';
-import 'screens/receiver_screen.dart';
+import 'screens/library_screen.dart';
+import 'screens/links_screen.dart';
+import 'screens/playlists_screen.dart';
+import 'screens/more_screen.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -99,10 +99,10 @@ class _MainNavigationState extends State<MainNavigation> {
         index: _currentIndex,
         children: [
           HomeScreen(key: _homeKey),
-          const DownloadsScreen(),
-          const NotesScreen(),
-          const StreamScreen(),
-          const ReceiverScreen(),
+          const LibraryScreen(),
+          const LinksScreen(),
+          const PlaylistsScreen(),
+          const MoreScreen(),
         ],
       ),
       bottomNavigationBar: Container(
@@ -125,24 +125,24 @@ class _MainNavigationState extends State<MainNavigation> {
               label: 'Home',
             ),
             BottomNavigationBarItem(
-              icon: Icon(Icons.download_outlined),
-              activeIcon: Icon(Icons.download),
-              label: 'Downloads',
+              icon: Icon(Icons.video_library_outlined),
+              activeIcon: Icon(Icons.video_library),
+              label: 'Library',
             ),
             BottomNavigationBarItem(
-              icon: Icon(Icons.note_outlined),
-              activeIcon: Icon(Icons.note),
-              label: 'Notes',
+              icon: Icon(Icons.link_outlined),
+              activeIcon: Icon(Icons.link),
+              label: 'Links',
             ),
             BottomNavigationBarItem(
-              icon: Icon(Icons.cast_outlined),
-              activeIcon: Icon(Icons.cast_connected),
-              label: 'Stream',
+              icon: Icon(Icons.playlist_play_outlined),
+              activeIcon: Icon(Icons.playlist_play),
+              label: 'Playlists',
             ),
             BottomNavigationBarItem(
-              icon: Icon(Icons.download_for_offline_outlined),
-              activeIcon: Icon(Icons.download_for_offline),
-              label: 'Receive',
+              icon: Icon(Icons.more_horiz_outlined),
+              activeIcon: Icon(Icons.more_horiz),
+              label: 'More',
             ),
           ],
         ),

@@ -1,4 +1,7 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:share_plus/share_plus.dart';
 import '../models/video_note.dart';
 import '../services/database_service.dart';
 import '../widgets/note_card.dart';
@@ -78,6 +81,27 @@ class _NotesScreenState extends State<NotesScreen> {
     if (confirm == true && note.id != null) {
       await DatabaseService.deleteNote(note.id!);
       await _loadNotes();
+    }
+  }
+
+  Future<void> _exportJson() async {
+    try {
+      final json = await DatabaseService.exportNotesAsJson();
+      final dir = await getTemporaryDirectory();
+      final file = File('${dir.path}/media_streamer_export.json');
+      await file.writeAsString(json);
+
+      if (mounted) {
+        await Share.shareXFiles([
+          XFile(file.path),
+        ], subject: 'MediaStreamer Export');
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Export failed: $e')));
+      }
     }
   }
 
@@ -176,6 +200,11 @@ class _NotesScreenState extends State<NotesScreen> {
                 }
               });
             },
+          ),
+          IconButton(
+            icon: const Icon(Icons.file_download),
+            onPressed: _exportJson,
+            tooltip: 'Export JSON',
           ),
         ],
       ),
