@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:receive_sharing_intent/receive_sharing_intent.dart';
 import 'app_theme.dart';
@@ -8,6 +9,8 @@ import 'screens/library_screen.dart';
 import 'screens/links_screen.dart';
 import 'screens/playlists_screen.dart';
 import 'screens/more_screen.dart';
+import 'screens/player_screen.dart';
+import 'services/local_media_service.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -42,6 +45,11 @@ class _MainNavigationState extends State<MainNavigation> {
 
   late StreamSubscription _intentSub;
 
+  // Channel to receive VIEW intents (file URIs) from native Android
+  static const _viewIntentChannel = MethodChannel(
+    'com.mediastreamer/view_intent',
+  );
+
   @override
   void initState() {
     super.initState();
@@ -60,11 +68,55 @@ class _MainNavigationState extends State<MainNavigation> {
     ReceiveSharingIntent.instance.getInitialMedia().then((files) {
       _handleSharedFiles(files);
     });
+
+    // Handle file VIEW intent from native side
+    _viewIntentChannel.setMethodCallHandler((call) async {
+      if (call.method == 'openFile') {
+        final filePath = call.arguments as String?;
+        if (filePath != null && filePath.isNotEmpty) {
+          _openMediaFile(filePath);
+        }
+      }
+    });
+
+    // Check for initial VIEW intent on cold start
+    _checkInitialViewIntent();
+  }
+
+  Future<void> _checkInitialViewIntent() async {
+    try {
+      final filePath = await _viewIntentChannel.invokeMethod<String>(
+        'getInitialFile',
+      );
+      if (filePath != null && filePath.isNotEmpty) {
+        // Delay to let the widget tree settle
+        Future.delayed(const Duration(milliseconds: 500), () {
+          _openMediaFile(filePath);
+        });
+      }
+    } catch (_) {
+      // No initial intent — that's fine
+    }
+  }
+
+  void _openMediaFile(String filePath) {
+    if (!mounted) return;
+
+    final fileName = filePath.split('/').last;
+
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) =>
+            PlayerScreen(filePath: filePath, title: fileName, youtubeUrl: ''),
+      ),
+    );
   }
 
   void _handleSharedFiles(List<SharedMediaFile> files) {
     for (final file in files) {
       final text = file.path;
+
       // Check if the shared text contains a YouTube URL
       if (text.contains('youtube.com') ||
           text.contains('youtu.be') ||
@@ -81,6 +133,16 @@ class _MainNavigationState extends State<MainNavigation> {
         Future.delayed(const Duration(milliseconds: 300), () {
           _homeKey.currentState?.setUrl(url);
         });
+        break;
+      }
+
+      // Check if it's a local media file path
+      if (LocalMediaService.isMediaExtension(
+        text.substring(
+          text.lastIndexOf('.') < 0 ? text.length : text.lastIndexOf('.'),
+        ),
+      )) {
+        _openMediaFile(text);
         break;
       }
     }

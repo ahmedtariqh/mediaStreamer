@@ -1,9 +1,11 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import '../services/youtube_service.dart';
 import '../services/local_media_service.dart';
 import '../widgets/video_tile.dart';
 import '../widgets/add_to_playlist_sheet.dart';
+import 'folder_browser_screen.dart';
 import 'player_screen.dart';
 import 'stream_screen.dart';
 
@@ -23,8 +25,15 @@ class _LibraryScreenState extends State<LibraryScreen>
   bool _isLoadingDownloads = true;
 
   // On Device tab
-  List<MediaFile> _localMedia = [];
+  List<MediaFile> _allLocalMedia = [];
   bool _isLoadingLocal = true;
+
+  // Sort, filter, search state for On Device tab
+  MediaSortOption _sort = MediaSortOption.dateNewest;
+  MediaFilterOption _filter = MediaFilterOption.all;
+  String _searchQuery = '';
+  bool _isSearching = false;
+  final _searchController = TextEditingController();
 
   @override
   void initState() {
@@ -37,6 +46,7 @@ class _LibraryScreenState extends State<LibraryScreen>
   @override
   void dispose() {
     _tabController.dispose();
+    _searchController.dispose();
     super.dispose();
   }
 
@@ -53,13 +63,21 @@ class _LibraryScreenState extends State<LibraryScreen>
 
   Future<void> _loadLocalMedia() async {
     setState(() => _isLoadingLocal = true);
-    final media = await LocalMediaService.scanDeviceMedia();
+    final media = await LocalMediaService.scanAllMedia();
     if (mounted) {
       setState(() {
-        _localMedia = media;
+        _allLocalMedia = media;
         _isLoadingLocal = false;
       });
     }
+  }
+
+  List<MediaFile> get _processedMedia {
+    var result = LocalMediaService.filterFiles(_allLocalMedia, _filter);
+    if (_searchQuery.isNotEmpty) {
+      result = LocalMediaService.searchFiles(result, _searchQuery);
+    }
+    return LocalMediaService.sortFiles(result, _sort);
   }
 
   String _extractTitle(String path) {
@@ -116,13 +134,99 @@ class _LibraryScreenState extends State<LibraryScreen>
     );
   }
 
+  // ───────── Sort, Search & Filter UI helpers ─────────
+
+  void _showSortMenu() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) {
+        final theme = Theme.of(ctx);
+        return Padding(
+          padding: const EdgeInsets.symmetric(vertical: 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                margin: const EdgeInsets.only(bottom: 12),
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: Colors.white24,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              Text('Sort By', style: theme.textTheme.titleMedium),
+              const SizedBox(height: 8),
+              ..._sortOptions.map(
+                (e) => ListTile(
+                  leading: Icon(
+                    _sort == e.value
+                        ? Icons.check_circle
+                        : Icons.circle_outlined,
+                    color: _sort == e.value
+                        ? theme.colorScheme.primary
+                        : Colors.white24,
+                    size: 22,
+                  ),
+                  title: Text(
+                    e.label,
+                    style: TextStyle(
+                      color: _sort == e.value
+                          ? theme.colorScheme.primary
+                          : Colors.white70,
+                      fontWeight: _sort == e.value
+                          ? FontWeight.w700
+                          : FontWeight.w400,
+                    ),
+                  ),
+                  onTap: () {
+                    setState(() => _sort = e.value);
+                    Navigator.pop(ctx);
+                  },
+                ),
+              ),
+              const SizedBox(height: 8),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  static const _sortOptions = [
+    (label: 'Name (A → Z)', value: MediaSortOption.nameAsc),
+    (label: 'Name (Z → A)', value: MediaSortOption.nameDesc),
+    (label: 'Date (Newest)', value: MediaSortOption.dateNewest),
+    (label: 'Date (Oldest)', value: MediaSortOption.dateOldest),
+    (label: 'Size (Largest)', value: MediaSortOption.sizeLargest),
+    (label: 'Size (Smallest)', value: MediaSortOption.sizeSmallest),
+  ];
+
+  // ───────── Build ─────────
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Library'),
+        title: _isSearching
+            ? TextField(
+                controller: _searchController,
+                autofocus: true,
+                style: const TextStyle(color: Colors.white),
+                decoration: const InputDecoration(
+                  hintText: 'Search media files...',
+                  hintStyle: TextStyle(color: Colors.white38),
+                  border: InputBorder.none,
+                ),
+                onChanged: (v) => setState(() => _searchQuery = v),
+              )
+            : const Text('Library'),
         bottom: TabBar(
           controller: _tabController,
           indicatorColor: theme.colorScheme.primary,
@@ -134,6 +238,37 @@ class _LibraryScreenState extends State<LibraryScreen>
           ],
         ),
         actions: [
+          // Search (only for On Device tab)
+          IconButton(
+            icon: Icon(_isSearching ? Icons.close : Icons.search),
+            onPressed: () {
+              setState(() {
+                _isSearching = !_isSearching;
+                if (!_isSearching) {
+                  _searchQuery = '';
+                  _searchController.clear();
+                }
+              });
+            },
+          ),
+          // Sort
+          IconButton(
+            icon: const Icon(Icons.sort),
+            onPressed: _showSortMenu,
+            tooltip: 'Sort',
+          ),
+          // Browse folders
+          IconButton(
+            icon: const Icon(Icons.folder_open),
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const FolderBrowserScreen()),
+              );
+            },
+            tooltip: 'Browse Folders',
+          ),
+          // Refresh
           IconButton(
             icon: const Icon(Icons.refresh),
             onPressed: () {
@@ -150,6 +285,8 @@ class _LibraryScreenState extends State<LibraryScreen>
       ),
     );
   }
+
+  // ───────── Downloads tab (unchanged) ─────────
 
   Widget _buildDownloadsTab(ThemeData theme) {
     if (_isLoadingDownloads) {
@@ -203,11 +340,28 @@ class _LibraryScreenState extends State<LibraryScreen>
     );
   }
 
+  // ───────── On Device tab (enhanced) ─────────
+
   Widget _buildLocalMediaTab(ThemeData theme) {
     if (_isLoadingLocal) {
-      return const Center(child: CircularProgressIndicator());
+      return const Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            CircularProgressIndicator(),
+            SizedBox(height: 16),
+            Text(
+              'Scanning device for media files...',
+              style: TextStyle(color: Colors.white38),
+            ),
+          ],
+        ),
+      );
     }
-    if (_localMedia.isEmpty) {
+
+    final media = _processedMedia;
+
+    if (_allLocalMedia.isEmpty) {
       return _buildEmptyState(
         theme,
         Icons.phone_android,
@@ -215,24 +369,81 @@ class _LibraryScreenState extends State<LibraryScreen>
         'No video or audio files found\non this device.',
       );
     }
-    return RefreshIndicator(
-      onRefresh: _loadLocalMedia,
-      child: ListView.builder(
-        padding: const EdgeInsets.symmetric(vertical: 8),
-        itemCount: _localMedia.length,
-        itemBuilder: (context, index) {
-          final media = _localMedia[index];
-          return _buildLocalMediaTile(theme, media);
-        },
+
+    return Column(
+      children: [
+        // Filter chips
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          child: Row(
+            children: [
+              _filterChip(theme, 'All', MediaFilterOption.all),
+              const SizedBox(width: 8),
+              _filterChip(theme, 'Video', MediaFilterOption.videoOnly),
+              const SizedBox(width: 8),
+              _filterChip(theme, 'Audio', MediaFilterOption.audioOnly),
+              const Spacer(),
+              Text(
+                '${media.length} files',
+                style: const TextStyle(color: Colors.white38, fontSize: 12),
+              ),
+            ],
+          ),
+        ),
+
+        // File list
+        Expanded(
+          child: media.isEmpty
+              ? Center(
+                  child: Text(
+                    _searchQuery.isNotEmpty
+                        ? 'No results for "$_searchQuery"'
+                        : 'No matching files',
+                    style: const TextStyle(color: Colors.white38),
+                  ),
+                )
+              : RefreshIndicator(
+                  onRefresh: _loadLocalMedia,
+                  child: ListView.builder(
+                    padding: const EdgeInsets.symmetric(vertical: 4),
+                    itemCount: media.length,
+                    itemBuilder: (context, index) =>
+                        _buildLocalMediaTile(theme, media[index]),
+                  ),
+                ),
+        ),
+      ],
+    );
+  }
+
+  Widget _filterChip(ThemeData theme, String label, MediaFilterOption opt) {
+    final selected = _filter == opt;
+    return FilterChip(
+      label: Text(
+        label,
+        style: TextStyle(
+          fontSize: 12,
+          color: selected ? Colors.white : Colors.white54,
+        ),
       ),
+      selected: selected,
+      onSelected: (_) => setState(() => _filter = opt),
+      selectedColor: theme.colorScheme.primary.withValues(alpha: 0.3),
+      backgroundColor: theme.cardColor,
+      checkmarkColor: Colors.white,
+      side: BorderSide(
+        color: selected ? theme.colorScheme.primary : Colors.white12,
+      ),
+      visualDensity: VisualDensity.compact,
     );
   }
 
   Widget _buildLocalMediaTile(ThemeData theme, MediaFile media) {
     final isVideo = media.type == MediaFileType.video;
+    final dateStr = DateFormat('MMM d, yyyy').format(media.lastModified);
 
     return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
       decoration: BoxDecoration(
         color: theme.cardColor,
         borderRadius: BorderRadius.circular(12),
@@ -262,11 +473,11 @@ class _LibraryScreenState extends State<LibraryScreen>
           media.name,
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
-          style: const TextStyle(fontWeight: FontWeight.w500),
+          style: const TextStyle(fontWeight: FontWeight.w500, fontSize: 14),
         ),
         subtitle: Text(
-          '${media.formattedSize} • ${isVideo ? "Video" : "Audio"}',
-          style: TextStyle(color: Colors.white38, fontSize: 12),
+          '${media.formattedSize} • $dateStr',
+          style: const TextStyle(color: Colors.white38, fontSize: 12),
         ),
         trailing: Row(
           mainAxisSize: MainAxisSize.min,
