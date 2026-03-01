@@ -1,23 +1,33 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../models/download_task.dart';
+import '../models/stream_info_item.dart';
 import '../services/youtube_service.dart';
 import '../widgets/download_progress_tile.dart';
+import '../widgets/format_picker_sheet.dart';
 
 class HomeScreen extends StatefulWidget {
-  const HomeScreen({super.key});
+  final TextEditingController? urlController;
+
+  const HomeScreen({super.key, this.urlController});
 
   @override
-  State<HomeScreen> createState() => _HomeScreenState();
+  State<HomeScreen> createState() => HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen>
+class HomeScreenState extends State<HomeScreen>
     with SingleTickerProviderStateMixin {
-  final _urlController = TextEditingController();
+  late TextEditingController _urlController;
   final _youtubeService = YoutubeService();
-  bool _isLoading = false;
+  bool _isFetching = false;
+  bool _isDownloading = false;
   DownloadTask? _activeDownload;
   String? _errorMessage;
+
+  // Download stats
+  int _downloadedBytes = 0;
+  int _totalBytes = 0;
+  double _downloadSpeed = 0;
 
   late AnimationController _pulseController;
   late Animation<double> _pulseAnimation;
@@ -25,6 +35,7 @@ class _HomeScreenState extends State<HomeScreen>
   @override
   void initState() {
     super.initState();
+    _urlController = widget.urlController ?? TextEditingController();
     _pulseController = AnimationController(
       vsync: this,
       duration: const Duration(seconds: 2),
@@ -36,10 +47,14 @@ class _HomeScreenState extends State<HomeScreen>
 
   @override
   void dispose() {
-    _urlController.dispose();
+    if (widget.urlController == null) _urlController.dispose();
     _youtubeService.dispose();
     _pulseController.dispose();
     super.dispose();
+  }
+
+  void setUrl(String url) {
+    _urlController.text = url;
   }
 
   Future<void> _pasteFromClipboard() async {
@@ -49,7 +64,7 @@ class _HomeScreenState extends State<HomeScreen>
     }
   }
 
-  Future<void> _downloadVideo() async {
+  Future<void> _fetchAndPickFormat() async {
     final url = _urlController.text.trim();
     if (url.isEmpty) {
       setState(() => _errorMessage = 'Please enter a YouTube URL');
@@ -57,48 +72,107 @@ class _HomeScreenState extends State<HomeScreen>
     }
 
     setState(() {
-      _isLoading = true;
+      _isFetching = true;
       _errorMessage = null;
-      _activeDownload = null;
     });
 
     try {
-      final task = await _youtubeService.downloadVideo(
+      final (video, streams) = await _youtubeService.getAvailableStreams(url);
+
+      if (!mounted) return;
+      setState(() => _isFetching = false);
+
+      // Show format picker
+      final selected = await showModalBottomSheet<StreamInfoItem>(
+        context: context,
+        isScrollControlled: true,
+        backgroundColor: Colors.transparent,
+        builder: (_) => FormatPickerSheet(
+          videoTitle: video.title,
+          thumbnailUrl: video.thumbnails.highResUrl,
+          streams: streams,
+        ),
+      );
+
+      if (selected != null && mounted) {
+        _startDownload(url, selected);
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _isFetching = false;
+          _errorMessage = 'Error: ${e.toString()}';
+        });
+      }
+    }
+  }
+
+  Future<void> _startDownload(String url, StreamInfoItem stream) async {
+    setState(() {
+      _isDownloading = true;
+      _errorMessage = null;
+      _downloadedBytes = 0;
+      _totalBytes = stream.sizeBytes;
+      _downloadSpeed = 0;
+      _activeDownload = DownloadTask(
+        videoId: '',
+        title: 'Downloading...',
+        thumbnailUrl: '',
+        youtubeUrl: url,
+        status: DownloadStatus.downloading,
+      );
+    });
+
+    try {
+      final task = await _youtubeService.downloadStream(
         url,
-        onProgress: (progress) {
-          setState(() {
-            _activeDownload = _activeDownload?..progress = progress;
-          });
+        stream,
+        onProgress: (progress, downloaded, total, speed) {
+          if (mounted) {
+            setState(() {
+              _activeDownload = _activeDownload?..progress = progress;
+              _downloadedBytes = downloaded;
+              _totalBytes = total;
+              _downloadSpeed = speed;
+            });
+          }
         },
       );
 
-      setState(() {
-        _activeDownload = task;
-        _isLoading = false;
-      });
+      if (mounted) {
+        setState(() {
+          _activeDownload = task;
+          _isDownloading = false;
+        });
 
-      if (task.status == DownloadStatus.completed && mounted) {
-        _urlController.clear();
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Downloaded: ${task.title}'),
-            backgroundColor: Colors.green.shade700,
-          ),
-        );
-      } else if (task.status == DownloadStatus.failed) {
-        setState(() => _errorMessage = task.errorMessage ?? 'Download failed');
+        if (task.status == DownloadStatus.completed) {
+          _urlController.clear();
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Downloaded: ${task.title}'),
+              backgroundColor: Colors.green.shade700,
+            ),
+          );
+        } else if (task.status == DownloadStatus.failed) {
+          setState(
+            () => _errorMessage = task.errorMessage ?? 'Download failed',
+          );
+        }
       }
     } catch (e) {
-      setState(() {
-        _isLoading = false;
-        _errorMessage = 'Error: ${e.toString()}';
-      });
+      if (mounted) {
+        setState(() {
+          _isDownloading = false;
+          _errorMessage = 'Error: ${e.toString()}';
+        });
+      }
     }
   }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final isBusy = _isFetching || _isDownloading;
 
     return Scaffold(
       appBar: AppBar(
@@ -169,7 +243,7 @@ class _HomeScreenState extends State<HomeScreen>
             ),
             const SizedBox(height: 8),
             Text(
-              'Paste a YouTube link to download and watch locally\nor stream to other devices on your network',
+              'Paste a YouTube link to choose format\nand download in your preferred quality',
               textAlign: TextAlign.center,
               style: theme.textTheme.bodyMedium?.copyWith(
                 color: Colors.white54,
@@ -203,10 +277,10 @@ class _HomeScreenState extends State<HomeScreen>
 
             const SizedBox(height: 16),
 
-            // Download button
+            // Fetch / Download button
             ElevatedButton.icon(
-              onPressed: _isLoading ? null : _downloadVideo,
-              icon: _isLoading
+              onPressed: isBusy ? null : _fetchAndPickFormat,
+              icon: isBusy
                   ? const SizedBox(
                       width: 20,
                       height: 20,
@@ -215,8 +289,14 @@ class _HomeScreenState extends State<HomeScreen>
                         color: Colors.white,
                       ),
                     )
-                  : const Icon(Icons.download),
-              label: Text(_isLoading ? 'Downloading...' : 'Download Video'),
+                  : const Icon(Icons.search),
+              label: Text(
+                _isFetching
+                    ? 'Fetching formats...'
+                    : _isDownloading
+                    ? 'Downloading...'
+                    : 'Fetch & Choose Format',
+              ),
               style: ElevatedButton.styleFrom(
                 padding: const EdgeInsets.symmetric(vertical: 16),
               ),
@@ -260,6 +340,9 @@ class _HomeScreenState extends State<HomeScreen>
               DownloadProgressTile(
                 title: _activeDownload!.title,
                 progress: _activeDownload!.progress,
+                downloadedBytes: _downloadedBytes,
+                totalBytes: _totalBytes,
+                speed: _downloadSpeed,
               ),
             ],
 
@@ -294,8 +377,13 @@ class _HomeScreenState extends State<HomeScreen>
                   ),
                   const SizedBox(height: 12),
                   _tipItem(
-                    Icons.play_circle_outline,
-                    'Watch downloaded videos in the Downloads tab',
+                    Icons.share,
+                    'Share a YouTube link from the YouTube app to download here',
+                  ),
+                  const SizedBox(height: 8),
+                  _tipItem(
+                    Icons.high_quality,
+                    'Choose between audio-only, 720p, 1080p, and more',
                   ),
                   const SizedBox(height: 8),
                   _tipItem(

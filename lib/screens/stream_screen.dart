@@ -1,9 +1,7 @@
 import 'dart:async';
-import 'package:bonsoir/bonsoir.dart';
 import 'package:flutter/material.dart';
 import '../services/streaming_server.dart';
 import '../services/network_discovery_service.dart';
-import 'player_screen.dart';
 
 class StreamScreen extends StatefulWidget {
   final String? filePath;
@@ -21,14 +19,11 @@ class _StreamScreenState extends State<StreamScreen> {
   String? _streamUrl;
   bool _isStarting = false;
   String _localIp = '...';
-  StreamSubscription<List<BonsoirService>>? _devicesSub;
-  List<BonsoirService> _devices = [];
 
   @override
   void initState() {
     super.initState();
     _loadIp();
-    _startDiscovery();
 
     // Auto-start server if filePath is provided
     if (widget.filePath != null) {
@@ -42,20 +37,12 @@ class _StreamScreenState extends State<StreamScreen> {
   void dispose() {
     _server.stopServer();
     _discovery.dispose();
-    _devicesSub?.cancel();
     super.dispose();
   }
 
   Future<void> _loadIp() async {
     final ip = await StreamingServer.getLocalIp();
     if (mounted) setState(() => _localIp = ip);
-  }
-
-  void _startDiscovery() {
-    _devicesSub = _discovery.devicesStream.listen((devices) {
-      if (mounted) setState(() => _devices = devices);
-    });
-    _discovery.startDiscovery();
   }
 
   Future<void> _startServer() async {
@@ -92,23 +79,6 @@ class _StreamScreenState extends State<StreamScreen> {
     if (mounted) setState(() => _streamUrl = null);
   }
 
-  void _connectToDevice(BonsoirService service) {
-    final ip = service.host ?? '0.0.0.0';
-    final port = service.port;
-    final url = 'http://$ip:$port/video.mp4';
-
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => PlayerScreen(
-          filePath: url,
-          title: 'Stream from ${service.name}',
-          youtubeUrl: '',
-        ),
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -120,11 +90,35 @@ class _StreamScreenState extends State<StreamScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // Server status card
             _buildServerCard(theme),
             const SizedBox(height: 24),
-            // Discovered devices
-            _buildDevicesSection(theme),
+            // Info card
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: theme.cardColor,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: Colors.white10),
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    Icons.info_outline,
+                    color: theme.colorScheme.secondary,
+                    size: 20,
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      'Other devices can receive this stream from the Receive tab',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: Colors.white54,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ],
         ),
       ),
@@ -257,93 +251,6 @@ class _StreamScreenState extends State<StreamScreen> {
             ),
         ],
       ),
-    );
-  }
-
-  Widget _buildDevicesSection(ThemeData theme) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            Icon(Icons.devices, color: theme.colorScheme.secondary, size: 20),
-            const SizedBox(width: 8),
-            Text(
-              'Nearby Devices',
-              style: theme.textTheme.titleMedium?.copyWith(
-                color: theme.colorScheme.secondary,
-              ),
-            ),
-            const Spacer(),
-            TextButton.icon(
-              onPressed: () {
-                _discovery.startDiscovery();
-              },
-              icon: const Icon(Icons.refresh, size: 16),
-              label: const Text('Scan'),
-            ),
-          ],
-        ),
-        const SizedBox(height: 12),
-        if (_devices.isEmpty)
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(32),
-            decoration: BoxDecoration(
-              color: theme.cardColor,
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: Colors.white10),
-            ),
-            child: Column(
-              children: [
-                const Icon(Icons.search, size: 40, color: Colors.white24),
-                const SizedBox(height: 12),
-                Text(
-                  'Scanning for devices...',
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                    color: Colors.white38,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  'Make sure other devices are on the same WiFi',
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: Colors.white24,
-                  ),
-                ),
-              ],
-            ),
-          )
-        else
-          ...List.generate(_devices.length, (index) {
-            final device = _devices[index];
-            return Card(
-              child: ListTile(
-                leading: Container(
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    color: theme.colorScheme.primary.withValues(alpha: 0.15),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Icon(
-                    Icons.phone_android,
-                    color: theme.colorScheme.primary,
-                  ),
-                ),
-                title: Text(device.name),
-                subtitle: Text(
-                  '${device.host ?? "resolving..."}:${device.port}',
-                ),
-                trailing: ElevatedButton(
-                  onPressed: device.host != null
-                      ? () => _connectToDevice(device)
-                      : null,
-                  child: const Text('Connect'),
-                ),
-              ),
-            );
-          }),
-      ],
     );
   }
 }
