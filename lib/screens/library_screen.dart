@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:permission_handler/permission_handler.dart';
 import '../services/youtube_service.dart';
 import '../services/local_media_service.dart';
 import '../widgets/video_tile.dart';
@@ -27,6 +28,8 @@ class _LibraryScreenState extends State<LibraryScreen>
   // On Device tab
   List<MediaFile> _allLocalMedia = [];
   bool _isLoadingLocal = true;
+  bool _hasPermission = true;
+  String? _scanError;
 
   // Sort, filter, search state for On Device tab
   MediaSortOption _sort = MediaSortOption.dateNewest;
@@ -39,6 +42,14 @@ class _LibraryScreenState extends State<LibraryScreen>
   void initState() {
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
+    _tabController.addListener(() {
+      // When switching to On Device tab, check permissions
+      if (_tabController.index == 1 &&
+          _allLocalMedia.isEmpty &&
+          !_isLoadingLocal) {
+        _loadLocalMedia();
+      }
+    });
     _loadDownloads();
     _loadLocalMedia();
   }
@@ -62,13 +73,49 @@ class _LibraryScreenState extends State<LibraryScreen>
   }
 
   Future<void> _loadLocalMedia() async {
-    setState(() => _isLoadingLocal = true);
-    final media = await LocalMediaService.scanAllMedia();
-    if (mounted) {
-      setState(() {
-        _allLocalMedia = media;
-        _isLoadingLocal = false;
-      });
+    setState(() {
+      _isLoadingLocal = true;
+      _scanError = null;
+    });
+
+    try {
+      // Check permissions first
+      final hasPermission = await LocalMediaService.requestPermissions();
+      if (!hasPermission) {
+        if (mounted) {
+          setState(() {
+            _hasPermission = false;
+            _isLoadingLocal = false;
+          });
+        }
+        return;
+      }
+
+      _hasPermission = true;
+      final media = await LocalMediaService.scanAllMedia();
+      if (mounted) {
+        setState(() {
+          _allLocalMedia = media;
+          _isLoadingLocal = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _scanError = e.toString();
+          _isLoadingLocal = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _requestPermission() async {
+    final granted = await LocalMediaService.requestPermissions();
+    if (granted) {
+      _loadLocalMedia();
+    } else {
+      // Open app settings if permission is permanently denied
+      await openAppSettings();
     }
   }
 
@@ -286,7 +333,7 @@ class _LibraryScreenState extends State<LibraryScreen>
     );
   }
 
-  // ───────── Downloads tab (unchanged) ─────────
+  // ───────── Downloads tab ─────────
 
   Widget _buildDownloadsTab(ThemeData theme) {
     if (_isLoadingDownloads) {
@@ -340,7 +387,7 @@ class _LibraryScreenState extends State<LibraryScreen>
     );
   }
 
-  // ───────── On Device tab (enhanced) ─────────
+  // ───────── On Device tab (enhanced with permission UI) ─────────
 
   Widget _buildLocalMediaTab(ThemeData theme) {
     if (_isLoadingLocal) {
@@ -355,6 +402,97 @@ class _LibraryScreenState extends State<LibraryScreen>
               style: TextStyle(color: Colors.white38),
             ),
           ],
+        ),
+      );
+    }
+
+    // Permission denied state
+    if (!_hasPermission) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(40),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(24),
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: Colors.orangeAccent.withValues(alpha: 0.1),
+                ),
+                child: Icon(
+                  Icons.folder_off_outlined,
+                  size: 64,
+                  color: Colors.orangeAccent.withValues(alpha: 0.7),
+                ),
+              ),
+              const SizedBox(height: 24),
+              Text(
+                'Storage Permission Required',
+                style: theme.textTheme.titleLarge?.copyWith(
+                  color: Colors.white70,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'MediaStreamer needs storage access to\nfind media files on your device.',
+                textAlign: TextAlign.center,
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: Colors.white38,
+                ),
+              ),
+              const SizedBox(height: 24),
+              ElevatedButton.icon(
+                onPressed: _requestPermission,
+                icon: const Icon(Icons.security),
+                label: const Text('Grant Permission'),
+                style: ElevatedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 24,
+                    vertical: 12,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    // Scan error state
+    if (_scanError != null) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(40),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Icon(
+                Icons.error_outline,
+                size: 64,
+                color: Colors.redAccent,
+              ),
+              const SizedBox(height: 16),
+              Text(
+                'Scan Error',
+                style: theme.textTheme.titleLarge?.copyWith(
+                  color: Colors.white70,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                _scanError!,
+                textAlign: TextAlign.center,
+                style: const TextStyle(color: Colors.white38),
+              ),
+              const SizedBox(height: 24),
+              ElevatedButton.icon(
+                onPressed: _loadLocalMedia,
+                icon: const Icon(Icons.refresh),
+                label: const Text('Retry'),
+              ),
+            ],
+          ),
         ),
       );
     }

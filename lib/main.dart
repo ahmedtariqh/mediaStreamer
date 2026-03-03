@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:media_kit/media_kit.dart';
 import 'package:receive_sharing_intent/receive_sharing_intent.dart';
 import 'app_theme.dart';
 import 'screens/home_screen.dart';
@@ -14,7 +13,6 @@ import 'services/local_media_service.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
-  MediaKit.ensureInitialized();
   runApp(const MediaStreamerApp());
 }
 
@@ -127,11 +125,11 @@ class _MainNavigationState extends State<MainNavigation> {
         ).firstMatch(text);
         final url = urlMatch?.group(0) ?? text;
 
-        // Navigate to home and set URL
+        // Navigate to home and auto-trigger format fetch
         setState(() => _currentIndex = 0);
         // Delay to ensure widget is built
         Future.delayed(const Duration(milliseconds: 300), () {
-          _homeKey.currentState?.setUrl(url);
+          _homeKey.currentState?.fetchAndPickFormatFromUrl(url);
         });
         break;
       }

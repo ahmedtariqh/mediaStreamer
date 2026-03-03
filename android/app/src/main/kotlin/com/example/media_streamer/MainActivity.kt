@@ -1,6 +1,7 @@
 package com.example.media_streamer
 
 import android.content.Intent
+import android.media.MediaScannerConnection
 import android.net.Uri
 import android.os.Bundle
 import android.provider.MediaStore
@@ -9,7 +10,8 @@ import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 
 class MainActivity : FlutterActivity() {
-    private val CHANNEL = "com.mediastreamer/view_intent"
+    private val VIEW_CHANNEL = "com.mediastreamer/view_intent"
+    private val MEDIA_STORE_CHANNEL = "com.mediastreamer/media_store"
     private var initialFilePath: String? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -21,13 +23,37 @@ class MainActivity : FlutterActivity() {
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
 
-        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL)
+        // View intent channel — open files from external apps
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, VIEW_CHANNEL)
             .setMethodCallHandler { call, result ->
                 when (call.method) {
                     "getInitialFile" -> {
                         result.success(initialFilePath)
                         // Clear after reading so it's not re-delivered
                         initialFilePath = null
+                    }
+                    else -> result.notImplemented()
+                }
+            }
+
+        // MediaStore channel — notify system about new files
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, MEDIA_STORE_CHANNEL)
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "scanFile" -> {
+                        val filePath = call.arguments as? String
+                        if (filePath != null) {
+                            MediaScannerConnection.scanFile(
+                                this,
+                                arrayOf(filePath),
+                                null
+                            ) { _, uri ->
+                                // Scan complete
+                            }
+                            result.success(true)
+                        } else {
+                            result.error("INVALID_ARG", "File path is null", null)
+                        }
                     }
                     else -> result.notImplemented()
                 }
@@ -41,7 +67,7 @@ class MainActivity : FlutterActivity() {
         // Notify Flutter about the new file
         val path = initialFilePath ?: return
         flutterEngine?.dartExecutor?.binaryMessenger?.let { messenger ->
-            MethodChannel(messenger, CHANNEL).invokeMethod("openFile", path)
+            MethodChannel(messenger, VIEW_CHANNEL).invokeMethod("openFile", path)
         }
         initialFilePath = null
     }

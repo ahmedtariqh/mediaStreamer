@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import '../models/download_task.dart';
 import '../models/stream_info_item.dart';
 import '../services/youtube_service.dart';
+import '../services/download_notification_service.dart';
 import '../widgets/download_progress_tile.dart';
 import '../widgets/format_picker_sheet.dart';
 
@@ -28,6 +29,9 @@ class HomeScreenState extends State<HomeScreen>
   int _downloadedBytes = 0;
   int _totalBytes = 0;
   double _downloadSpeed = 0;
+
+  // Notification ID counter
+  int _notifId = 100;
 
   late AnimationController _pulseController;
   late Animation<double> _pulseAnimation;
@@ -55,6 +59,12 @@ class HomeScreenState extends State<HomeScreen>
 
   void setUrl(String url) {
     _urlController.text = url;
+  }
+
+  /// Called from share intent — sets URL and immediately shows format picker.
+  void fetchAndPickFormatFromUrl(String url) {
+    _urlController.text = url;
+    _fetchAndPickFormat();
   }
 
   Future<void> _pasteFromClipboard() async {
@@ -108,6 +118,7 @@ class HomeScreenState extends State<HomeScreen>
   }
 
   Future<void> _startDownload(String url, StreamInfoItem stream) async {
+    final notifId = _notifId++;
     setState(() {
       _isDownloading = true;
       _errorMessage = null;
@@ -136,6 +147,16 @@ class HomeScreenState extends State<HomeScreen>
               _downloadSpeed = speed;
             });
           }
+
+          // Update notification progress
+          final percent = (progress * 100).clamp(0, 100).toInt();
+          final speedStr = _formatSpeed(speed);
+          DownloadNotificationService.showProgress(
+            id: notifId,
+            title: _activeDownload?.title ?? 'Downloading...',
+            progress: percent,
+            body: '$percent% • $speedStr',
+          );
         },
       );
 
@@ -147,6 +168,14 @@ class HomeScreenState extends State<HomeScreen>
 
         if (task.status == DownloadStatus.completed) {
           _urlController.clear();
+
+          // Show completion notification
+          DownloadNotificationService.showComplete(
+            id: notifId,
+            title: task.title,
+            filePath: task.filePath,
+          );
+
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text('Downloaded: ${task.title}'),
@@ -154,19 +183,40 @@ class HomeScreenState extends State<HomeScreen>
             ),
           );
         } else if (task.status == DownloadStatus.failed) {
+          // Show failure notification
+          DownloadNotificationService.showFailed(
+            id: notifId,
+            title: task.title,
+            error: task.errorMessage,
+          );
+
           setState(
-            () => _errorMessage = task.errorMessage ?? 'Download failed',
+            () => _errorMessage =
+                '${task.errorMessage ?? 'Download failed'}\nPartial file kept — tap "Retry" to try again.',
           );
         }
       }
     } catch (e) {
       if (mounted) {
+        DownloadNotificationService.showFailed(
+          id: notifId,
+          title: 'Download',
+          error: e.toString(),
+        );
         setState(() {
           _isDownloading = false;
-          _errorMessage = 'Error: ${e.toString()}';
+          _errorMessage = 'Error: ${e.toString()}\nTap "Retry" to try again.';
         });
       }
     }
+  }
+
+  String _formatSpeed(double bytesPerSec) {
+    if (bytesPerSec < 1024) return '${bytesPerSec.toInt()} B/s';
+    if (bytesPerSec < 1048576) {
+      return '${(bytesPerSec / 1024).toStringAsFixed(1)} KB/s';
+    }
+    return '${(bytesPerSec / 1048576).toStringAsFixed(1)} MB/s';
   }
 
   @override
@@ -392,8 +442,8 @@ class HomeScreenState extends State<HomeScreen>
                   ),
                   const SizedBox(height: 8),
                   _tipItem(
-                    Icons.note_add,
-                    'Save notes after watching — video auto-deletes',
+                    Icons.folder_open,
+                    'Downloads saved to Downloads/MediaStreamer folder',
                   ),
                 ],
               ),

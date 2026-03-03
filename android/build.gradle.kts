@@ -1,5 +1,7 @@
 allprojects {
     repositories {
+        maven { url = uri("https://maven.aliyun.com/repository/google") }
+        maven { url = uri("https://maven.aliyun.com/repository/public") }
         google()
         mavenCentral()
     }
@@ -28,11 +30,10 @@ gradle.projectsEvaluated {
                 jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
             }
         }
-    }
-    // Fix receive_sharing_intent Java/Kotlin JVM target mismatch
-    project(":receive_sharing_intent").tasks.withType<JavaCompile>().configureEach {
-        sourceCompatibility = "17"
-        targetCompatibility = "17"
+        tasks.withType<JavaCompile>().configureEach {
+            sourceCompatibility = "17"
+            targetCompatibility = "17"
+        }
     }
 }
 

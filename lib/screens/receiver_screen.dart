@@ -44,7 +44,7 @@ class _ReceiverScreenState extends State<ReceiverScreen> {
   void _connectToDevice(BonsoirService service) {
     final ip = service.host ?? '0.0.0.0';
     final port = service.port;
-    final url = 'http://$ip:$port/video.mp4';
+    final url = 'http://$ip:$port/stream';
 
     Navigator.push(
       context,

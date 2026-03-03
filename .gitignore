@@ -1,4 +1,5 @@
 # Miscellaneous
+.vlc/
 *.class
 *.log
 *.pyc

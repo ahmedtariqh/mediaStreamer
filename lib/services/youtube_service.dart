@@ -1,7 +1,7 @@
 import 'dart:io';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:youtube_explode_dart/youtube_explode_dart.dart';
-import 'package:path_provider/path_provider.dart';
 import '../models/download_task.dart';
 import '../models/stream_info_item.dart';
 
@@ -16,6 +16,15 @@ typedef DownloadProgressCallback =
 
 class YoutubeService {
   final YoutubeExplode _yt = YoutubeExplode();
+
+  /// Public download directory visible to all apps.
+  static const _publicDownloadDir =
+      '/storage/emulated/0/Download/MediaStreamer';
+
+  /// Method channel for MediaStore scanning.
+  static const _mediaStoreChannel = MethodChannel(
+    'com.mediastreamer/media_store',
+  );
 
   /// Fetch video metadata from a YouTube URL.
   Future<Video> getVideoInfo(String url) async {
@@ -85,6 +94,7 @@ class YoutubeService {
   }
 
   /// Download with a specific stream selection.
+  /// Files are saved to the public Downloads/MediaStreamer folder.
   /// [onProgress] provides progress, downloaded bytes, total bytes, and speed.
   Future<DownloadTask> downloadStream(
     String url,
@@ -94,9 +104,8 @@ class YoutubeService {
     final video = await _yt.videos.get(url);
     final stream = _yt.videos.streamsClient.get(selectedStream.streamInfo);
 
-    // Prepare local file
-    final dir = await getApplicationDocumentsDirectory();
-    final videosDir = Directory('${dir.path}/videos');
+    // Save to public Downloads folder
+    final videosDir = Directory(_publicDownloadDir);
     if (!await videosDir.exists()) {
       await videosDir.create(recursive: true);
     }
@@ -156,14 +165,27 @@ class YoutubeService {
       await fileStream.flush();
       await fileStream.close();
       task.status = DownloadStatus.completed;
+
+      // Notify MediaStore so the file appears in gallery/file manager apps
+      _scanMediaStore(filePath);
     } catch (e) {
+      await fileStream.flush();
       await fileStream.close();
-      if (await file.exists()) await file.delete();
+      // Keep the partial file so the user can retry or re-download
       task.status = DownloadStatus.failed;
       task.errorMessage = e.toString();
     }
 
     return task;
+  }
+
+  /// Notify Android MediaStore about a new file.
+  static void _scanMediaStore(String filePath) {
+    try {
+      _mediaStoreChannel.invokeMethod('scanFile', filePath);
+    } catch (e) {
+      debugPrint('MediaStore scan failed: $e');
+    }
   }
 
   /// Legacy download — highest quality muxed stream.
@@ -183,10 +205,9 @@ class YoutubeService {
     );
   }
 
-  /// List all downloaded video files.
+  /// List all downloaded video files from the public folder.
   static Future<List<FileSystemEntity>> getDownloadedVideos() async {
-    final dir = await getApplicationDocumentsDirectory();
-    final videosDir = Directory('${dir.path}/videos');
+    final videosDir = Directory(_publicDownloadDir);
     if (!await videosDir.exists()) return [];
     return videosDir
         .listSync()
