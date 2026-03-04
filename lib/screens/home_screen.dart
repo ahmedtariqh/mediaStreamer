@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../models/download_task.dart';
 import '../models/stream_info_item.dart';
+import '../models/youtube_link.dart';
+import '../services/database_service.dart';
 import '../services/youtube_service.dart';
 import '../services/download_notification_service.dart';
 import '../widgets/download_progress_tile.dart';
@@ -169,6 +171,16 @@ class HomeScreenState extends State<HomeScreen>
         if (task.status == DownloadStatus.completed) {
           _urlController.clear();
 
+          // Persist the YouTube link so it appears in JSON exports & webhooks
+          await DatabaseService.saveLink(
+            YoutubeLink(
+              url: task.youtubeUrl,
+              title: task.title,
+              notes: 'Downloaded: ${task.filePath.split('/').last}',
+              dateAdded: DateTime.now(),
+            ),
+          );
+
           // Show completion notification
           DownloadNotificationService.showComplete(
             id: notifId,
@@ -176,6 +188,7 @@ class HomeScreenState extends State<HomeScreen>
             filePath: task.filePath,
           );
 
+          if (!mounted) return;
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text('Downloaded: ${task.title}'),

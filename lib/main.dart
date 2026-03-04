@@ -12,6 +12,7 @@ import 'screens/more_screen.dart';
 import 'screens/player_screen.dart';
 import 'services/database_service.dart';
 import 'services/local_media_service.dart';
+import 'services/webhook_service.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -84,6 +85,9 @@ class _MainNavigationState extends State<MainNavigation> {
 
     // Check if we should show resume dialog
     _checkResumeOnStartup();
+
+    // Start webhook service if enabled
+    WebhookService.start();
   }
 
   Future<void> _checkResumeOnStartup() async {
@@ -259,6 +263,7 @@ class _MainNavigationState extends State<MainNavigation> {
   @override
   void dispose() {
     _intentSub.cancel();
+    WebhookService.stop();
     super.dispose();
   }
 
