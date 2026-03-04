@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import '../models/playlist.dart';
 import '../models/playlist_item.dart';
@@ -60,6 +61,20 @@ class _PlaylistDetailScreenState extends State<PlaylistDetailScreen> {
     }
   }
 
+  String _extractYoutubeUrl(String path) {
+    if (path.isEmpty) return '';
+    final fileName = path.split(Platform.pathSeparator).last;
+    final underscoreIndex = fileName.indexOf('_');
+    if (underscoreIndex != -1) {
+      final videoId = fileName.substring(0, underscoreIndex);
+      // Simple check to ensure it looks like a YouTube ID (typically 11 chars)
+      if (videoId.length == 11) {
+        return 'https://youtube.com/watch?v=$videoId';
+      }
+    }
+    return '';
+  }
+
   void _playItem(PlaylistItem item) {
     if (item.type == PlaylistItemType.youtubeLink) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -76,7 +91,7 @@ class _PlaylistDetailScreenState extends State<PlaylistDetailScreen> {
         builder: (_) => PlayerScreen(
           filePath: item.path,
           title: item.title,
-          youtubeUrl: '',
+          youtubeUrl: _extractYoutubeUrl(item.path),
         ),
       ),
     );

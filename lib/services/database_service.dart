@@ -250,11 +250,20 @@ class DatabaseService {
 
   static Future<String> exportNotesAsJson() async {
     final notes = await getNotes();
-    final links = await getLinks();
 
     final data = {
       'exportDate': DateTime.now().toIso8601String(),
       'videoNotes': notes.map((n) => n.toMap()..remove('id')).toList(),
+    };
+
+    return const JsonEncoder.withIndent('  ').convert(data);
+  }
+
+  static Future<String> exportLinksAsJson() async {
+    final links = await getLinks();
+
+    final data = {
+      'exportDate': DateTime.now().toIso8601String(),
       'youtubeLinks': links.map((l) => l.toJson()).toList(),
     };
 

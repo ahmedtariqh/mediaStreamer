@@ -114,9 +114,9 @@ class _LinksScreenState extends State<LinksScreen> {
 
   Future<void> _exportJson() async {
     try {
-      final json = await DatabaseService.exportNotesAsJson();
+      final json = await DatabaseService.exportLinksAsJson();
       final dir = await getTemporaryDirectory();
-      final file = File('${dir.path}/media_streamer_export.json');
+      final file = File('${dir.path}/youtube_links_export.json');
       await file.writeAsString(json);
 
       if (mounted) {

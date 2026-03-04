@@ -88,7 +88,7 @@ class _NotesScreenState extends State<NotesScreen> {
     try {
       final json = await DatabaseService.exportNotesAsJson();
       final dir = await getTemporaryDirectory();
-      final file = File('${dir.path}/media_streamer_export.json');
+      final file = File('${dir.path}/video_notes_export.json');
       await file.writeAsString(json);
 
       if (mounted) {

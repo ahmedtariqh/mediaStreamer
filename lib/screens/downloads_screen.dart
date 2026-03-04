@@ -34,12 +34,25 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
   String _extractTitle(String path) {
     final fileName = path.split(Platform.pathSeparator).last;
     // Remove videoId_ prefix and .mp4 suffix
-    final withoutExt = fileName.replaceAll('.mp4', '');
+    final withoutExt = fileName
+        .replaceAll('.mp4', '')
+        .replaceAll('.webm', '')
+        .replaceAll('.m4a', '');
     final underscoreIndex = withoutExt.indexOf('_');
     if (underscoreIndex != -1 && underscoreIndex < withoutExt.length - 1) {
       return withoutExt.substring(underscoreIndex + 1);
     }
     return withoutExt;
+  }
+
+  String _extractYoutubeUrl(String path) {
+    final fileName = path.split(Platform.pathSeparator).last;
+    final underscoreIndex = fileName.indexOf('_');
+    if (underscoreIndex != -1) {
+      final videoId = fileName.substring(0, underscoreIndex);
+      return 'https://youtube.com/watch?v=$videoId';
+    }
+    return '';
   }
 
   Future<void> _deleteVideo(String path) async {
@@ -111,7 +124,7 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
                           builder: (_) => PlayerScreen(
                             filePath: video.path,
                             title: title,
-                            youtubeUrl: '',
+                            youtubeUrl: _extractYoutubeUrl(video.path),
                           ),
                         ),
                       ).then((_) => _loadVideos());
