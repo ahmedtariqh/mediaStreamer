@@ -2,7 +2,7 @@ import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_vlc_player/flutter_vlc_player.dart';
+import 'package:video_player/video_player.dart';
 import '../models/video_note.dart';
 import '../services/database_service.dart';
 import '../services/youtube_service.dart';
@@ -25,7 +25,8 @@ class PlayerScreen extends StatefulWidget {
 }
 
 class _PlayerScreenState extends State<PlayerScreen> {
-  VlcPlayerController? _controller;
+  VideoPlayerController? _controller;
+
   bool _hasShownDialog = false;
   bool _isPlaying = false;
   bool _isInitialized = false;
@@ -34,11 +35,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
   double _playbackSpeed = 1.0;
   Duration _position = Duration.zero;
   Duration _duration = Duration.zero;
-  int _currentAudioTrack = -1;
-  int _currentSubTrack = -1;
   Timer? _hideTimer;
   Timer? _positionTimer;
-  Timer? _initTimeoutTimer;
 
   // Error state
   bool _hasError = false;
@@ -51,14 +49,14 @@ class _PlayerScreenState extends State<PlayerScreen> {
   double _dragStartY = 0;
   double _dragStartX = 0;
   double _dragStartValue = 0;
-  double _currentVolume = 100;
+  double _currentVolume = 1.0;
   double _currentBrightness = 0.5;
   Duration _seekTarget = Duration.zero;
   String? _gestureText;
   IconData? _gestureIcon;
 
   // Double-tap seek
-  int _doubleTapSide = 0; // -1 = left (rewind), 1 = right (forward)
+  int _doubleTapSide = 0;
   Timer? _doubleTapTimer;
   int _doubleTapCount = 0;
 
@@ -85,84 +83,72 @@ class _PlayerScreenState extends State<PlayerScreen> {
       _isInitialized = false;
     });
 
-    String effectivePath = widget.filePath;
+    final effectivePath = widget.filePath;
 
-    // Check if the file actually exists for local paths
-    if (!effectivePath.startsWith('http')) {
-      final file = File(effectivePath);
-      if (!file.existsSync()) {
-        setState(() {
-          _hasError = true;
-          _errorMessage = 'File not found: $effectivePath';
-        });
-        return;
+    try {
+      if (effectivePath.startsWith('http')) {
+        _controller = VideoPlayerController.networkUrl(
+          Uri.parse(effectivePath),
+        );
+      } else {
+        // Check if the file exists
+        final file = File(effectivePath);
+        if (!file.existsSync()) {
+          setState(() {
+            _hasError = true;
+            _errorMessage = 'File not found:\n$effectivePath';
+          });
+          return;
+        }
+        _controller = VideoPlayerController.file(file);
       }
+
+      _controller!
+          .initialize()
+          .then((_) {
+            if (!mounted) return;
+            setState(() {
+              _isInitialized = true;
+              _duration = _controller!.value.duration;
+            });
+            _controller!.play();
+            _controller!.addListener(_onPlayerEvent);
+            _startPositionPolling();
+          })
+          .catchError((error) {
+            if (mounted) {
+              setState(() {
+                _hasError = true;
+                _errorMessage =
+                    'Could not play this file.\n${error.toString()}';
+              });
+            }
+          });
+    } catch (e) {
+      setState(() {
+        _hasError = true;
+        _errorMessage = 'Player error: ${e.toString()}';
+      });
     }
-
-    final isNetwork = effectivePath.startsWith('http');
-
-    if (isNetwork) {
-      _controller = VlcPlayerController.network(
-        effectivePath,
-        autoPlay: true,
-        hwAcc: HwAcc.full,
-        options: VlcPlayerOptions(
-          advanced: VlcAdvancedOptions([
-            VlcAdvancedOptions.networkCaching(2000),
-          ]),
-        ),
-      );
-    } else {
-      _controller = VlcPlayerController.file(
-        File(effectivePath),
-        autoPlay: true,
-        hwAcc: HwAcc.full,
-        options: VlcPlayerOptions(),
-      );
-    }
-
-    _controller!.addListener(_onPlayerEvent);
-    _startPositionPolling();
-
-    // Set a timeout for initialization — if VLC doesn't initialize in 15s, show error
-    _initTimeoutTimer = Timer(const Duration(seconds: 15), () {
-      if (mounted && !_isInitialized && !_hasError) {
-        setState(() {
-          _hasError = true;
-          _errorMessage =
-              'Player failed to start. The file may be corrupted or unsupported.';
-        });
-      }
-    });
   }
 
   void _startPositionPolling() {
-    _positionTimer = Timer.periodic(const Duration(milliseconds: 500), (
-      _,
-    ) async {
+    _positionTimer = Timer.periodic(const Duration(milliseconds: 500), (_) {
       if (!mounted || !_isInitialized || _controller == null) return;
-      try {
-        final value = _controller!.value;
-        final pos = value.position;
-        final dur = value.duration;
-        final playing = value.isPlaying;
-        if (mounted) {
-          setState(() {
-            _position = pos;
-            _duration = dur;
-            _isPlaying = playing;
-          });
-        }
+      final value = _controller!.value;
+      setState(() {
+        _position = value.position;
+        _isPlaying = value.isPlaying;
+      });
 
-        // Check for completion
-        if (dur.inSeconds > 0 &&
-            pos.inSeconds >= dur.inSeconds - 1 &&
-            !_hasShownDialog &&
-            !playing) {
-          _hasShownDialog = true;
-          _showPostWatchDialog();
-        }
-      } catch (_) {}
+      // Check for completion
+      if (_duration.inSeconds > 0 &&
+          value.position.inSeconds >= _duration.inSeconds - 1 &&
+          !_hasShownDialog &&
+          !value.isPlaying) {
+        _hasShownDialog = true;
+        _showPostWatchDialog();
+      }
     });
   }
 
@@ -170,31 +156,17 @@ class _PlayerScreenState extends State<PlayerScreen> {
     if (!mounted || _controller == null) return;
     final value = _controller!.value;
 
-    // Check for errors
-    if (value.playingState == PlayingState.error) {
+    if (value.hasError) {
       setState(() {
         _hasError = true;
-        _errorMessage =
-            'Playback error. The file may be corrupted or unsupported.';
-      });
-      _initTimeoutTimer?.cancel();
-      return;
-    }
-
-    if (value.isInitialized && !_isInitialized) {
-      _initTimeoutTimer?.cancel();
-      setState(() {
-        _isInitialized = true;
-        _duration = value.duration;
-        _isPlaying = value.isPlaying;
+        _errorMessage = value.errorDescription ?? 'Unknown playback error';
       });
     }
   }
 
   void _retryPlayer() {
-    _controller?.removeListener(_onPlayerEvent);
     _positionTimer?.cancel();
-    _initTimeoutTimer?.cancel();
+    _controller?.removeListener(_onPlayerEvent);
     _controller?.dispose();
     _controller = null;
     _initPlayer();
@@ -206,7 +178,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _hideTimer?.cancel();
     _positionTimer?.cancel();
     _doubleTapTimer?.cancel();
-    _initTimeoutTimer?.cancel();
     _controller?.removeListener(_onPlayerEvent);
     _controller?.dispose();
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
@@ -286,30 +257,32 @@ class _PlayerScreenState extends State<PlayerScreen> {
   void _onVerticalDragUpdate(DragUpdateDetails details, double screenHeight) {
     if (_isLocked || _controller == null) return;
     final dy = _dragStartY - details.globalPosition.dy;
-    final delta = (dy / (screenHeight * 0.6)) * 100;
+    final delta = dy / (screenHeight * 0.6);
 
     if (_isDraggingVolume) {
-      final newVol = (_dragStartValue + delta).clamp(0.0, 200.0);
-      _controller!.setVolume(newVol.toInt());
+      final newVol = (_dragStartValue + delta).clamp(0.0, 1.0);
+      _controller!.setVolume(newVol);
       setState(() {
         _currentVolume = newVol;
+        final pct = (newVol * 100).toInt();
         _gestureIcon = newVol == 0
             ? Icons.volume_off
-            : newVol < 50
+            : newVol < 0.5
             ? Icons.volume_down
             : Icons.volume_up;
-        _gestureText = '${newVol.toInt()}%';
+        _gestureText = '$pct%';
       });
     } else if (_isDraggingBrightness) {
-      final newBright = ((_dragStartValue * 100 + delta) / 100).clamp(0.0, 1.0);
+      final newBright = (_dragStartValue + delta).clamp(0.0, 1.0);
       setState(() {
         _currentBrightness = newBright;
+        final pct = (newBright * 100).toInt();
         _gestureIcon = newBright < 0.3
             ? Icons.brightness_low
             : newBright < 0.7
             ? Icons.brightness_medium
             : Icons.brightness_high;
-        _gestureText = '${(newBright * 100).toInt()}%';
+        _gestureText = '$pct%';
       });
     }
   }
@@ -398,108 +371,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
         });
       }
     });
-  }
-
-  // --- Track Selection ---
-
-  void _showAudioTrackPicker() async {
-    if (_controller == null) return;
-    final tracks = await _controller!.getAudioTracks();
-    if (!mounted || tracks.isEmpty) return;
-    if (!mounted) return;
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (ctx) => _buildTrackSheet(
-        'Audio Tracks',
-        tracks,
-        _currentAudioTrack,
-        (id) async {
-          await _controller!.setAudioTrack(id);
-          if (!mounted) return;
-          setState(() => _currentAudioTrack = id);
-          if (ctx.mounted) Navigator.pop(ctx);
-        },
-      ),
-    );
-  }
-
-  void _showSubtitleTrackPicker() async {
-    if (_controller == null) return;
-    final tracks = await _controller!.getSpuTracks();
-    if (!mounted || tracks.isEmpty) return;
-
-    final allTracks = {-1: 'Disable', ...tracks};
-    if (!mounted) return;
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (ctx) => _buildTrackSheet(
-        'Subtitles',
-        allTracks,
-        _currentSubTrack,
-        (id) async {
-          await _controller!.setSpuTrack(id);
-          if (!mounted) return;
-          setState(() => _currentSubTrack = id);
-          if (ctx.mounted) Navigator.pop(ctx);
-        },
-      ),
-    );
-  }
-
-  Widget _buildTrackSheet(
-    String title,
-    Map<int, String> tracks,
-    int currentId,
-    Function(int) onSelect,
-  ) {
-    final theme = Theme.of(context);
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 16),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            margin: const EdgeInsets.only(bottom: 12),
-            width: 40,
-            height: 4,
-            decoration: BoxDecoration(
-              color: Colors.white24,
-              borderRadius: BorderRadius.circular(2),
-            ),
-          ),
-          Text(title, style: theme.textTheme.titleMedium),
-          const SizedBox(height: 8),
-          ...tracks.entries.map((e) {
-            final isSelected = e.key == currentId;
-            return ListTile(
-              leading: Icon(
-                isSelected ? Icons.check_circle : Icons.circle_outlined,
-                color: isSelected ? theme.colorScheme.primary : Colors.white24,
-                size: 22,
-              ),
-              title: Text(
-                e.value,
-                style: TextStyle(
-                  color: isSelected
-                      ? theme.colorScheme.primary
-                      : Colors.white70,
-                  fontWeight: isSelected ? FontWeight.w700 : FontWeight.w400,
-                ),
-              ),
-              onTap: () => onSelect(e.key),
-            );
-          }),
-        ],
-      ),
-    );
   }
 
   void _showSpeedPicker() {
@@ -630,15 +501,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
       backgroundColor: Colors.black,
       body: Stack(
         children: [
-          // VLC Player
-          if (_controller != null && !_hasError)
+          // Video Player
+          if (_controller != null && _isInitialized && !_hasError)
             Center(
-              child: VlcPlayer(
-                controller: _controller!,
-                aspectRatio: 16 / 9,
-                placeholder: const Center(
-                  child: CircularProgressIndicator(color: Colors.white),
-                ),
+              child: AspectRatio(
+                aspectRatio: _controller!.value.aspectRatio,
+                child: VideoPlayer(_controller!),
               ),
             ),
 
@@ -852,24 +720,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
                                   fontWeight: FontWeight.w600,
                                 ),
                               ),
-                            ),
-                            // Subtitles
-                            IconButton(
-                              icon: const Icon(
-                                Icons.subtitles_outlined,
-                                color: Colors.white70,
-                              ),
-                              onPressed: _showSubtitleTrackPicker,
-                              tooltip: 'Subtitles',
-                            ),
-                            // Audio tracks
-                            IconButton(
-                              icon: const Icon(
-                                Icons.audiotrack,
-                                color: Colors.white70,
-                              ),
-                              onPressed: _showAudioTrackPicker,
-                              tooltip: 'Audio tracks',
                             ),
                             // Notes
                             IconButton(
