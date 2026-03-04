@@ -21,13 +21,16 @@ class DatabaseService {
 
     return openDatabase(
       path,
-      version: 2,
+      version: 3,
       onCreate: (db, version) async {
         await _createAllTables(db);
       },
       onUpgrade: (db, oldVersion, newVersion) async {
         if (oldVersion < 2) {
           await _createV2Tables(db);
+        }
+        if (oldVersion < 3) {
+          await _createV3Tables(db);
         }
       },
     );
@@ -44,6 +47,7 @@ class DatabaseService {
       )
     ''');
     await _createV2Tables(db);
+    await _createV3Tables(db);
   }
 
   static Future<void> _createV2Tables(Database db) async {
@@ -255,5 +259,79 @@ class DatabaseService {
     };
 
     return const JsonEncoder.withIndent('  ').convert(data);
+  }
+
+  // ─── Playback Positions (v3) ──────────────────────────────────
+
+  static Future<void> _createV3Tables(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS playback_positions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        filePath TEXT NOT NULL UNIQUE,
+        positionMs INTEGER NOT NULL DEFAULT 0,
+        durationMs INTEGER NOT NULL DEFAULT 0,
+        title TEXT NOT NULL DEFAULT '',
+        lastPlayed TEXT NOT NULL
+      )
+    ''');
+  }
+
+  static Future<void> savePlaybackPosition({
+    required String filePath,
+    required int positionMs,
+    required int durationMs,
+    required String title,
+  }) async {
+    final db = await database;
+    await db.insert('playback_positions', {
+      'filePath': filePath,
+      'positionMs': positionMs,
+      'durationMs': durationMs,
+      'title': title,
+      'lastPlayed': DateTime.now().toIso8601String(),
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
+  }
+
+  static Future<Map<String, dynamic>?> getPlaybackPosition(
+    String filePath,
+  ) async {
+    final db = await database;
+    final maps = await db.query(
+      'playback_positions',
+      where: 'filePath = ?',
+      whereArgs: [filePath],
+    );
+    if (maps.isEmpty) return null;
+    return maps.first;
+  }
+
+  static Future<Map<String, dynamic>?> getLastPlayedMedia() async {
+    final db = await database;
+    final maps = await db.query(
+      'playback_positions',
+      orderBy: 'lastPlayed DESC',
+      limit: 1,
+    );
+    if (maps.isEmpty) return null;
+    return maps.first;
+  }
+
+  static Future<List<Map<String, dynamic>>> getAllPlaybackPositions() async {
+    final db = await database;
+    return db.query('playback_positions', orderBy: 'lastPlayed DESC');
+  }
+
+  static Future<void> deletePlaybackPosition(String filePath) async {
+    final db = await database;
+    await db.delete(
+      'playback_positions',
+      where: 'filePath = ?',
+      whereArgs: [filePath],
+    );
+  }
+
+  static Future<void> clearAllPlaybackPositions() async {
+    final db = await database;
+    await db.delete('playback_positions');
   }
 }

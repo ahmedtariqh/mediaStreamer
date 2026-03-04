@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'stream_screen.dart';
 import 'receiver_screen.dart';
 import 'notes_screen.dart';
+import 'settings_screen.dart';
 
 class MoreScreen extends StatelessWidget {
   const MoreScreen({super.key});
@@ -64,6 +65,23 @@ class MoreScreen extends StatelessWidget {
               onTap: () => Navigator.push(
                 context,
                 MaterialPageRoute(builder: (_) => const NotesScreen()),
+              ),
+            ),
+            const SizedBox(height: 12),
+            _buildOptionCard(
+              context,
+              theme,
+              icon: Icons.settings,
+              title: 'Settings',
+              subtitle: 'Resume playback, history & preferences',
+              gradient: [
+                Colors.blueGrey.withValues(alpha: 0.15),
+                Colors.grey.withValues(alpha: 0.08),
+              ],
+              iconColor: Colors.blueGrey,
+              onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const SettingsScreen()),
               ),
             ),
           ],

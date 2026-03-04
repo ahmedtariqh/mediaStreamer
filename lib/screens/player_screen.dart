@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:video_player/video_player.dart';
 import '../models/video_note.dart';
 import '../services/database_service.dart';
@@ -62,6 +63,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   static const _speeds = [0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0, 3.0];
 
+  // Position save counter (save every ~5 seconds)
+  int _positionSaveCounter = 0;
+
   @override
   void initState() {
     super.initState();
@@ -105,12 +109,37 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
       _controller!
           .initialize()
-          .then((_) {
+          .then((_) async {
             if (!mounted) return;
             setState(() {
               _isInitialized = true;
               _duration = _controller!.value.duration;
             });
+
+            // Check if we should resume from saved position
+            final prefs = await SharedPreferences.getInstance();
+            final resumeEnabled = prefs.getBool('resumePlayback') ?? true;
+            if (resumeEnabled) {
+              final saved = await DatabaseService.getPlaybackPosition(
+                widget.filePath,
+              );
+              if (saved != null) {
+                final savedPos = Duration(
+                  milliseconds: saved['positionMs'] as int,
+                );
+                final savedDur = Duration(
+                  milliseconds: saved['durationMs'] as int,
+                );
+                // Only resume if not near the end (within 95%)
+                if (savedPos.inMilliseconds < savedDur.inMilliseconds * 0.95) {
+                  await _controller!.seekTo(savedPos);
+                  if (mounted) {
+                    setState(() => _position = savedPos);
+                  }
+                }
+              }
+            }
+
             _controller!.play();
             _controller!.addListener(_onPlayerEvent);
             _startPositionPolling();
@@ -141,6 +170,13 @@ class _PlayerScreenState extends State<PlayerScreen> {
         _isPlaying = value.isPlaying;
       });
 
+      // Save position every ~5 seconds (10 ticks × 500ms)
+      _positionSaveCounter++;
+      if (_positionSaveCounter >= 10) {
+        _positionSaveCounter = 0;
+        _saveCurrentPosition();
+      }
+
       // Check for completion
       if (_duration.inSeconds > 0 &&
           value.position.inSeconds >= _duration.inSeconds - 1 &&
@@ -150,6 +186,19 @@ class _PlayerScreenState extends State<PlayerScreen> {
         _showPostWatchDialog();
       }
     });
+  }
+
+  Future<void> _saveCurrentPosition() async {
+    if (_controller == null || !_isInitialized) return;
+    final pos = _controller!.value.position;
+    final dur = _controller!.value.duration;
+    if (dur.inMilliseconds <= 0) return;
+    await DatabaseService.savePlaybackPosition(
+      filePath: widget.filePath,
+      positionMs: pos.inMilliseconds,
+      durationMs: dur.inMilliseconds,
+      title: widget.title,
+    );
   }
 
   void _onPlayerEvent() {
@@ -175,6 +224,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   @override
   void dispose() {
+    // Save position one last time before disposing
+    _saveCurrentPosition();
     _hideTimer?.cancel();
     _positionTimer?.cancel();
     _doubleTapTimer?.cancel();

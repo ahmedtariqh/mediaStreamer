@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:receive_sharing_intent/receive_sharing_intent.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'app_theme.dart';
 import 'screens/home_screen.dart';
 import 'screens/library_screen.dart';
@@ -9,6 +10,7 @@ import 'screens/links_screen.dart';
 import 'screens/playlists_screen.dart';
 import 'screens/more_screen.dart';
 import 'screens/player_screen.dart';
+import 'services/database_service.dart';
 import 'services/local_media_service.dart';
 
 void main() {
@@ -79,6 +81,114 @@ class _MainNavigationState extends State<MainNavigation> {
 
     // Check for initial VIEW intent on cold start
     _checkInitialViewIntent();
+
+    // Check if we should show resume dialog
+    _checkResumeOnStartup();
+  }
+
+  Future<void> _checkResumeOnStartup() async {
+    // Small delay to let the UI settle
+    await Future.delayed(const Duration(milliseconds: 800));
+    if (!mounted) return;
+
+    final prefs = await SharedPreferences.getInstance();
+    final showResume = prefs.getBool('showResumeOnStartup') ?? true;
+    if (!showResume) return;
+
+    final lastPlayed = await DatabaseService.getLastPlayedMedia();
+    if (lastPlayed == null) return;
+
+    final filePath = lastPlayed['filePath'] as String;
+    final title = lastPlayed['title'] as String;
+    final positionMs = lastPlayed['positionMs'] as int;
+    final durationMs = lastPlayed['durationMs'] as int;
+
+    // Don't show if near the end (>95%)
+    if (durationMs <= 0 || positionMs >= durationMs * 0.95) return;
+
+    // Format the position for display
+    final pos = Duration(milliseconds: positionMs);
+    final dur = Duration(milliseconds: durationMs);
+    String fmt(Duration d) {
+      final h = d.inHours;
+      final m = d.inMinutes.remainder(60);
+      final s = d.inSeconds.remainder(60);
+      if (h > 0) {
+        return '${h.toString().padLeft(2, '0')}:${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}';
+      }
+      return '${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}';
+    }
+
+    final percent = (positionMs / durationMs * 100).toInt();
+
+    if (!mounted) return;
+    showDialog(
+      context: context,
+      builder: (ctx) {
+        final theme = Theme.of(ctx);
+        return AlertDialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+          ),
+          title: Row(
+            children: [
+              Icon(
+                Icons.play_circle_filled,
+                color: theme.colorScheme.primary,
+                size: 28,
+              ),
+              const SizedBox(width: 10),
+              const Expanded(child: Text('Continue Watching?')),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                title,
+                style: theme.textTheme.titleSmall?.copyWith(
+                  fontWeight: FontWeight.w600,
+                ),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+              const SizedBox(height: 12),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(4),
+                child: LinearProgressIndicator(
+                  value: positionMs / durationMs,
+                  minHeight: 6,
+                  backgroundColor: Colors.white12,
+                  color: theme.colorScheme.primary,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                '${fmt(pos)} / ${fmt(dur)}  ($percent%)',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: Colors.white54,
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Dismiss'),
+            ),
+            FilledButton.icon(
+              onPressed: () {
+                Navigator.pop(ctx);
+                _openMediaFile(filePath);
+              },
+              icon: const Icon(Icons.play_arrow, size: 20),
+              label: const Text('Resume'),
+            ),
+          ],
+        );
+      },
+    );
   }
 
   Future<void> _checkInitialViewIntent() async {
