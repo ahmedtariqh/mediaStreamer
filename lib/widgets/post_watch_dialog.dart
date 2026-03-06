@@ -17,6 +17,8 @@ class PostWatchDialog extends StatefulWidget {
 class _PostWatchDialogState extends State<PostWatchDialog> {
   final _notesController = TextEditingController();
   bool _showNotesField = false;
+  // Which save mode: 'save' (+ delete) or 'save_keep'
+  String _saveAction = 'save';
 
   @override
   void dispose() {
@@ -65,6 +67,18 @@ class _PostWatchDialogState extends State<PostWatchDialog> {
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
                       ),
+                      if (widget.youtubeUrl.isNotEmpty) ...[
+                        const SizedBox(height: 2),
+                        Text(
+                          widget.youtubeUrl,
+                          style: TextStyle(
+                            color: theme.colorScheme.primary,
+                            fontSize: 11,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
                     ],
                   ),
                 ),
@@ -87,12 +101,17 @@ class _PostWatchDialogState extends State<PostWatchDialog> {
               const SizedBox(height: 16),
               ElevatedButton.icon(
                 onPressed: () {
-                  Navigator.of(
-                    context,
-                  ).pop({'action': 'save', 'notes': _notesController.text});
+                  Navigator.of(context).pop({
+                    'action': _saveAction,
+                    'notes': _notesController.text,
+                  });
                 },
                 icon: const Icon(Icons.save),
-                label: const Text('Save Notes & Delete Video'),
+                label: Text(
+                  _saveAction == 'save'
+                      ? 'Save Notes & Delete Video'
+                      : 'Save Notes & Keep Video',
+                ),
               ),
               const SizedBox(height: 8),
               TextButton(
@@ -100,23 +119,45 @@ class _PostWatchDialogState extends State<PostWatchDialog> {
                 child: const Text('Cancel'),
               ),
             ] else ...[
-              // Two action buttons
+              // ── Option 1: Add Notes & Keep Video ──
               ElevatedButton.icon(
-                onPressed: () => setState(() => _showNotesField = true),
+                onPressed: () => setState(() {
+                  _saveAction = 'save_keep';
+                  _showNotesField = true;
+                }),
                 icon: const Icon(Icons.note_add),
-                label: const Text('Add Notes & Delete'),
+                label: const Text('Add Notes & Keep Video'),
                 style: ElevatedButton.styleFrom(
                   padding: const EdgeInsets.symmetric(vertical: 14),
                 ),
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 10),
+
+              // ── Option 2: Add Notes & Delete Video ──
+              ElevatedButton.icon(
+                onPressed: () => setState(() {
+                  _saveAction = 'save';
+                  _showNotesField = true;
+                }),
+                icon: const Icon(Icons.note_add_outlined),
+                label: const Text('Add Notes & Delete Video'),
+                style: ElevatedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  backgroundColor: theme.colorScheme.secondary.withValues(
+                    alpha: 0.8,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 10),
+
+              // ── Option 3: Delete Right Away ──
               OutlinedButton.icon(
                 onPressed: () {
                   Navigator.of(context).pop({'action': 'delete'});
                 },
                 icon: const Icon(Icons.delete_outline, color: Colors.redAccent),
                 label: const Text(
-                  'Delete Right Away',
+                  'Delete Video',
                   style: TextStyle(color: Colors.redAccent),
                 ),
                 style: OutlinedButton.styleFrom(
@@ -125,6 +166,8 @@ class _PostWatchDialogState extends State<PostWatchDialog> {
                 ),
               ),
               const SizedBox(height: 8),
+
+              // ── Option 4: Keep Video (dismiss) ──
               TextButton(
                 onPressed: () => Navigator.of(context).pop(null),
                 child: const Text('Keep Video'),

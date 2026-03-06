@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:bonsoir/bonsoir.dart';
+import 'package:flutter/foundation.dart';
 
 class NetworkDiscoveryService {
   BonsoirBroadcast? _broadcast;
@@ -30,6 +31,7 @@ class NetworkDiscoveryService {
     _broadcast = BonsoirBroadcast(service: service);
     await _broadcast!.initialize();
     await _broadcast!.start();
+    debugPrint('[Discovery] Broadcasting: $deviceName on port $port');
   }
 
   /// Stop broadcasting.
@@ -44,24 +46,37 @@ class NetworkDiscoveryService {
   Future<void> startDiscovery() async {
     await stopDiscovery();
     _discoveredDevices.clear();
+    _devicesController.add([]);
 
     _discovery = BonsoirDiscovery(type: _serviceType);
     await _discovery!.initialize();
 
     _discovery!.eventStream!.listen((event) {
+      debugPrint(
+        '[Discovery] Event: ${event.runtimeType} - ${event.service?.name}',
+      );
+
       if (event is BonsoirDiscoveryServiceResolvedEvent) {
         final resolved = event.service;
+        debugPrint(
+          '[Discovery] Resolved: ${resolved.name} at ${resolved.host}:${resolved.port}',
+        );
         if (!_discoveredDevices.any((d) => d.name == resolved.name)) {
           _discoveredDevices.add(resolved);
           _devicesController.add(List.from(_discoveredDevices));
         }
+      } else if (event is BonsoirDiscoveryServiceFoundEvent) {
+        debugPrint('[Discovery] Found (unresolved): ${event.service.name}');
+        // Service found but not resolved yet — Bonsoir should auto-resolve
       } else if (event is BonsoirDiscoveryServiceLostEvent) {
+        debugPrint('[Discovery] Lost: ${event.service.name}');
         _discoveredDevices.removeWhere((d) => d.name == event.service.name);
         _devicesController.add(List.from(_discoveredDevices));
       }
     });
 
     await _discovery!.start();
+    debugPrint('[Discovery] Discovery started for $_serviceType');
   }
 
   /// Stop discovery.

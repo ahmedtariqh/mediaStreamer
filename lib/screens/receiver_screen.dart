@@ -37,7 +37,7 @@ class _ReceiverScreenState extends State<ReceiverScreen> {
     setState(() => _isScanning = true);
     await _discovery.startDiscovery();
     // Give it a moment for UI feedback
-    await Future.delayed(const Duration(seconds: 2));
+    await Future.delayed(const Duration(seconds: 3));
     if (mounted) setState(() => _isScanning = false);
   }
 
@@ -58,6 +58,74 @@ class _ReceiverScreenState extends State<ReceiverScreen> {
     );
   }
 
+  void _connectManually() {
+    final ipController = TextEditingController();
+    final portController = TextEditingController(text: '8080');
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Manual Connection'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text(
+              'Enter the IP address and port shown on the streaming device.',
+              style: TextStyle(color: Colors.white54, fontSize: 13),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: ipController,
+              decoration: const InputDecoration(
+                labelText: 'IP Address',
+                hintText: '192.168.1.100',
+                border: OutlineInputBorder(),
+              ),
+              keyboardType: TextInputType.number,
+              autofocus: true,
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: portController,
+              decoration: const InputDecoration(
+                labelText: 'Port',
+                hintText: '8080',
+                border: OutlineInputBorder(),
+              ),
+              keyboardType: TextInputType.number,
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () {
+              final ip = ipController.text.trim();
+              final port = portController.text.trim();
+              if (ip.isEmpty) return;
+              Navigator.pop(ctx);
+              final url = 'http://$ip:$port/stream';
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => PlayerScreen(
+                    filePath: url,
+                    title: 'Stream from $ip',
+                    youtubeUrl: '',
+                  ),
+                ),
+              );
+            },
+            child: const Text('Connect'),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -66,6 +134,11 @@ class _ReceiverScreenState extends State<ReceiverScreen> {
       appBar: AppBar(
         title: const Text('Receive'),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.edit_note),
+            onPressed: _connectManually,
+            tooltip: 'Manual IP entry',
+          ),
           IconButton(
             icon: _isScanning
                 ? SizedBox(
@@ -143,6 +216,12 @@ class _ReceiverScreenState extends State<ReceiverScreen> {
                 icon: const Icon(Icons.search),
                 label: const Text('Scan Again'),
               ),
+              const SizedBox(height: 12),
+              OutlinedButton.icon(
+                onPressed: _connectManually,
+                icon: const Icon(Icons.keyboard),
+                label: const Text('Enter IP Manually'),
+              ),
             ],
           ],
         ),
@@ -156,6 +235,7 @@ class _ReceiverScreenState extends State<ReceiverScreen> {
       itemCount: _devices.length,
       itemBuilder: (context, index) {
         final device = _devices[index];
+        final hasHost = device.host != null && device.host!.isNotEmpty;
         return Card(
           margin: const EdgeInsets.symmetric(vertical: 6, horizontal: 0),
           child: ListTile(
@@ -181,15 +261,15 @@ class _ReceiverScreenState extends State<ReceiverScreen> {
             ),
             title: Text(device.name, style: theme.textTheme.titleMedium),
             subtitle: Text(
-              '${device.host ?? "resolving..."}:${device.port}',
-              style: theme.textTheme.bodySmall?.copyWith(color: Colors.white38),
+              hasHost ? '${device.host}:${device.port}' : 'Resolving...',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: hasHost ? Colors.white38 : Colors.amber,
+              ),
             ),
             trailing: ElevatedButton.icon(
-              onPressed: device.host != null
-                  ? () => _connectToDevice(device)
-                  : null,
+              onPressed: hasHost ? () => _connectToDevice(device) : null,
               icon: const Icon(Icons.play_arrow, size: 18),
-              label: const Text('Connect'),
+              label: Text(hasHost ? 'Connect' : 'Wait...'),
               style: ElevatedButton.styleFrom(
                 padding: const EdgeInsets.symmetric(
                   horizontal: 12,

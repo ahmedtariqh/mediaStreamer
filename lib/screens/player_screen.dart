@@ -492,38 +492,96 @@ class _PlayerScreenState extends State<PlayerScreen> {
     );
   }
 
+  /// Extract YouTube URL from downloaded filename pattern: {videoId}_{title}.ext
+  String _resolveYoutubeUrl() {
+    if (widget.youtubeUrl.isNotEmpty) return widget.youtubeUrl;
+    // Try extracting from filename
+    final fileName = widget.filePath.split(Platform.pathSeparator).last;
+    final underscoreIndex = fileName.indexOf('_');
+    if (underscoreIndex > 0) {
+      final videoId = fileName.substring(0, underscoreIndex);
+      // YouTube IDs are typically 11 chars
+      if (videoId.length >= 10 && videoId.length <= 12) {
+        return 'https://youtube.com/watch?v=$videoId';
+      }
+    }
+    return '';
+  }
+
+  /// Clean title by stripping videoId prefix and file extension.
+  String _resolveTitle() {
+    final fileName = widget.filePath.split(Platform.pathSeparator).last;
+    // Strip extension
+    var clean = fileName.replaceAll(
+      RegExp(r'\.(mp4|webm|m4a|mkv|avi)$', caseSensitive: false),
+      '',
+    );
+    // Strip videoId prefix (pattern: videoId_title)
+    final underscoreIndex = clean.indexOf('_');
+    if (underscoreIndex > 0) {
+      final possibleId = clean.substring(0, underscoreIndex);
+      if (possibleId.length >= 10 && possibleId.length <= 12) {
+        clean = clean.substring(underscoreIndex + 1);
+      }
+    }
+    // If we ended up with something useful, use it; otherwise use original title
+    return clean.isNotEmpty ? clean : widget.title;
+  }
+
   Future<void> _showPostWatchDialog() async {
     if (!mounted) return;
+
+    final resolvedUrl = _resolveYoutubeUrl();
+    final resolvedTitle = _resolveTitle();
 
     final result = await showDialog<Map<String, String>?>(
       context: context,
       barrierDismissible: false,
-      builder: (context) => PostWatchDialog(
-        videoTitle: widget.title,
-        youtubeUrl: widget.youtubeUrl,
-      ),
+      builder: (context) =>
+          PostWatchDialog(videoTitle: resolvedTitle, youtubeUrl: resolvedUrl),
     );
 
     if (result == null) return;
 
-    if (result['action'] == 'save') {
+    final action = result['action'];
+    final notes = result['notes'] ?? '';
+
+    if (action == 'save' || action == 'save_keep') {
       final note = VideoNote(
-        youtubeUrl: widget.youtubeUrl,
-        title: widget.title,
-        notes: result['notes'] ?? '',
+        youtubeUrl: resolvedUrl,
+        title: resolvedTitle,
+        notes: notes,
         dateWatched: DateTime.now(),
       );
       await DatabaseService.saveNote(note);
-      await YoutubeService.deleteVideo(widget.filePath);
 
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Notes saved, video deleted')),
-        );
-        Navigator.pop(context);
+      if (action == 'save') {
+        // Save notes AND delete video
+        try {
+          await YoutubeService.deleteVideo(widget.filePath);
+        } catch (e) {
+          debugPrint('Delete failed: $e');
+        }
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Notes saved, video deleted')),
+          );
+          Navigator.pop(context);
+        }
+      } else {
+        // save_keep: Save notes, keep video
+        if (mounted) {
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(const SnackBar(content: Text('Notes saved')));
+        }
       }
-    } else if (result['action'] == 'delete') {
-      await YoutubeService.deleteVideo(widget.filePath);
+    } else if (action == 'delete') {
+      try {
+        await YoutubeService.deleteVideo(widget.filePath);
+      } catch (e) {
+        debugPrint('Delete failed: $e');
+      }
       if (mounted) {
         ScaffoldMessenger.of(
           context,
