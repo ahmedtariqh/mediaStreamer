@@ -211,6 +211,136 @@ class DownloadManager extends ChangeNotifier {
     _subscriptions[task.id] = sub;
   }
 
+  Future<void> startGenericDownload(String url, String fileName) async {
+    // Check for duplicates
+    if (_activeDownloads.values.any(
+      (task) =>
+          task.youtubeUrl == url &&
+          task.status != DownloadStatus.failed &&
+          task.status != DownloadStatus.cancelled,
+    )) {
+      throw Exception('Already downloading this file.');
+    }
+
+    final videosDir = Directory(YoutubeService.publicDownloadDir);
+    if (!await videosDir.exists()) {
+      await videosDir.create(recursive: true);
+    }
+
+    final sanitizedTitle = fileName
+        .replaceAll(RegExp(r'[<>:"/\\|?*]'), '_')
+        .substring(0, fileName.length.clamp(0, 80));
+    final filePath = '${videosDir.path}/$sanitizedTitle';
+    final file = File(filePath);
+    final fileSink = file.openWrite();
+
+    final task = DownloadTask(
+      videoId: 'generic_${DateTime.now().millisecondsSinceEpoch}',
+      title: sanitizedTitle,
+      thumbnailUrl: '', // No thumbnail for generic files
+      youtubeUrl: url,
+      filePath: filePath,
+      status: DownloadStatus.downloading,
+    );
+
+    _activeDownloads[task.id] = task;
+    _sinks[task.id] = fileSink;
+    notifyListeners();
+
+    try {
+      final request = await HttpClient().getUrl(Uri.parse(url));
+      final response = await request.close();
+      task.totalBytes = response.contentLength > 0 ? response.contentLength : 0;
+
+      var lastSpeedCalcTime = DateTime.now();
+      var lastSpeedCalcBytes = 0;
+
+      final sub = response.listen(
+        (chunk) {
+          fileSink.add(chunk);
+          task.downloadedBytes += chunk.length;
+          if (task.totalBytes > 0) {
+            task.progress = task.downloadedBytes / task.totalBytes;
+          }
+
+          final now = DateTime.now();
+          final elapsed = now.difference(lastSpeedCalcTime).inMilliseconds;
+          if (elapsed >= 500) {
+            final bytesSinceLastCalc =
+                task.downloadedBytes - lastSpeedCalcBytes;
+            task.currentSpeed = bytesSinceLastCalc / (elapsed / 1000);
+            lastSpeedCalcTime = now;
+            lastSpeedCalcBytes = task.downloadedBytes;
+
+            DownloadNotificationService.showProgress(
+              id: task.id.hashCode,
+              title: task.title,
+              progress: task.totalBytes > 0
+                  ? (task.progress * 100).toInt()
+                  : -1,
+              body:
+                  '${(task.currentSpeed / 1024 / 1024).toStringAsFixed(2)} MB/s',
+            );
+            notifyListeners();
+          }
+        },
+        onDone: () async {
+          await fileSink.flush();
+          await fileSink.close();
+          _sinks.remove(task.id);
+          _subscriptions.remove(task.id);
+
+          task.status = DownloadStatus.completed;
+          task.progress = 1.0;
+
+          DownloadNotificationService.showComplete(
+            id: task.id.hashCode,
+            title: task.title,
+            filePath: task.filePath,
+          );
+          YoutubeService.scanMediaStore(task.filePath);
+
+          _addToHistory(task);
+          _activeDownloads.remove(task.id);
+          notifyListeners();
+        },
+        onError: (e) async {
+          await fileSink.flush();
+          await fileSink.close();
+          _sinks.remove(task.id);
+          _subscriptions.remove(task.id);
+
+          task.status = DownloadStatus.failed;
+          task.errorMessage = e.toString();
+
+          DownloadNotificationService.showFailed(
+            id: task.id.hashCode,
+            title: task.title,
+            error: e.toString(),
+          );
+          notifyListeners();
+        },
+        cancelOnError: true,
+      );
+
+      _subscriptions[task.id] = sub;
+    } catch (e) {
+      await fileSink.flush();
+      await fileSink.close();
+      _sinks.remove(task.id);
+
+      task.status = DownloadStatus.failed;
+      task.errorMessage = e.toString();
+
+      DownloadNotificationService.showFailed(
+        id: task.id.hashCode,
+        title: task.title,
+        error: e.toString(),
+      );
+      notifyListeners();
+    }
+  }
+
   void pauseDownload(String id) {
     if (_subscriptions.containsKey(id)) {
       _subscriptions[id]?.pause();
