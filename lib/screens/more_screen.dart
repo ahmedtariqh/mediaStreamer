@@ -3,9 +3,12 @@ import 'stream_screen.dart';
 import 'receiver_screen.dart';
 import 'notes_screen.dart';
 import 'settings_screen.dart';
+import 'browser_screen.dart';
 
 class MoreScreen extends StatelessWidget {
-  const MoreScreen({super.key});
+  final void Function(String url)? onUrlDetected;
+
+  const MoreScreen({super.key, this.onUrlDetected});
 
   @override
   Widget build(BuildContext context) {
@@ -66,6 +69,28 @@ class MoreScreen extends StatelessWidget {
                 context,
                 MaterialPageRoute(builder: (_) => const NotesScreen()),
               ),
+            ),
+            const SizedBox(height: 12),
+            _buildOptionCard(
+              context,
+              theme,
+              icon: Icons.language,
+              title: 'Web Browser',
+              subtitle: 'Browse with ad/popup protection and detect videos',
+              gradient: [
+                Colors.purple.withValues(alpha: 0.15),
+                Colors.deepPurple.withValues(alpha: 0.08),
+              ],
+              iconColor: Colors.purpleAccent,
+              onTap: () async {
+                final url = await Navigator.push<String>(
+                  context,
+                  MaterialPageRoute(builder: (_) => const BrowserScreen()),
+                );
+                if (url != null && onUrlDetected != null) {
+                  onUrlDetected!(url);
+                }
+              },
             ),
             const SizedBox(height: 12),
             _buildOptionCard(

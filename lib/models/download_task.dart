@@ -1,6 +1,16 @@
-enum DownloadStatus { queued, downloading, completed, failed, cancelled }
+import 'package:uuid/uuid.dart';
+
+enum DownloadStatus {
+  queued,
+  downloading,
+  paused,
+  completed,
+  failed,
+  cancelled,
+}
 
 class DownloadTask {
+  final String id;
   final String videoId;
   final String title;
   final String thumbnailUrl;
@@ -10,7 +20,13 @@ class DownloadTask {
   DownloadStatus status;
   String? errorMessage;
 
+  // Transient state variables
+  int downloadedBytes = 0;
+  int totalBytes = 0;
+  double currentSpeed = 0.0;
+
   DownloadTask({
+    String? id,
     required this.videoId,
     required this.title,
     required this.thumbnailUrl,
@@ -19,5 +35,5 @@ class DownloadTask {
     this.progress = 0.0,
     this.status = DownloadStatus.queued,
     this.errorMessage,
-  });
+  }) : id = id ?? const Uuid().v4();
 }

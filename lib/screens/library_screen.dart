@@ -1,9 +1,9 @@
-import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:permission_handler/permission_handler.dart';
-import '../services/youtube_service.dart';
 import '../services/local_media_service.dart';
+import '../services/download_manager.dart';
+import '../widgets/download_progress_tile.dart';
 import '../widgets/video_tile.dart';
 import '../widgets/add_to_playlist_sheet.dart';
 import 'folder_browser_screen.dart';
@@ -22,8 +22,7 @@ class _LibraryScreenState extends State<LibraryScreen>
   late TabController _tabController;
 
   // Downloads tab
-  List<FileSystemEntity> _downloads = [];
-  bool _isLoadingDownloads = true;
+  bool _isLoadingDownloads = false;
 
   // On Device tab
   List<MediaFile> _allLocalMedia = [];
@@ -63,10 +62,9 @@ class _LibraryScreenState extends State<LibraryScreen>
 
   Future<void> _loadDownloads() async {
     setState(() => _isLoadingDownloads = true);
-    final videos = await YoutubeService.getDownloadedVideos();
+    await DownloadManager().checkExistingFiles();
     if (mounted) {
       setState(() {
-        _downloads = videos;
         _isLoadingDownloads = false;
       });
     }
@@ -127,17 +125,7 @@ class _LibraryScreenState extends State<LibraryScreen>
     return LocalMediaService.sortFiles(result, _sort);
   }
 
-  String _extractTitle(String path) {
-    final fileName = path.split(Platform.pathSeparator).last;
-    final withoutExt = fileName.replaceAll(RegExp(r'\.[^.]+$'), '');
-    final underscoreIndex = withoutExt.indexOf('_');
-    if (underscoreIndex != -1 && underscoreIndex < withoutExt.length - 1) {
-      return withoutExt.substring(underscoreIndex + 1);
-    }
-    return withoutExt;
-  }
-
-  Future<void> _deleteDownload(String path) async {
+  Future<void> _deleteDownload(String path, String downloadId) async {
     final confirm = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -158,8 +146,7 @@ class _LibraryScreenState extends State<LibraryScreen>
     );
 
     if (confirm == true) {
-      await YoutubeService.deleteVideo(path);
-      await _loadDownloads();
+      await DownloadManager().deleteHistoryFile(downloadId);
       if (mounted) {
         ScaffoldMessenger.of(
           context,
@@ -339,51 +326,111 @@ class _LibraryScreenState extends State<LibraryScreen>
     if (_isLoadingDownloads) {
       return const Center(child: CircularProgressIndicator());
     }
-    if (_downloads.isEmpty) {
-      return _buildEmptyState(
-        theme,
-        Icons.video_library_outlined,
-        'No Downloaded Videos',
-        'Go to the Home tab and paste a\nYouTube link to start downloading!',
-      );
-    }
-    return RefreshIndicator(
-      onRefresh: _loadDownloads,
-      child: ListView.builder(
-        padding: const EdgeInsets.symmetric(vertical: 8),
-        itemCount: _downloads.length,
-        itemBuilder: (context, index) {
-          final video = _downloads[index];
-          final title = _extractTitle(video.path);
-          return VideoTile(
-            title: title,
-            filePath: video.path,
-            onPlay: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => PlayerScreen(
-                    filePath: video.path,
-                    title: title,
-                    youtubeUrl: '',
+
+    return ListenableBuilder(
+      listenable: DownloadManager(),
+      builder: (context, _) {
+        final activeTasks = DownloadManager().activeTasks;
+        final history = DownloadManager().history
+            .where((e) => e.fileExists)
+            .toList();
+
+        if (activeTasks.isEmpty && history.isEmpty) {
+          return _buildEmptyState(
+            theme,
+            Icons.video_library_outlined,
+            'No Downloaded Videos',
+            'Go to the Home tab and paste a\nYouTube link to start downloading!',
+          );
+        }
+
+        return RefreshIndicator(
+          onRefresh: _loadDownloads,
+          child: ListView(
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            children: [
+              if (activeTasks.isNotEmpty) ...[
+                Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 8,
+                  ),
+                  child: Text(
+                    'Active Downloads (${activeTasks.length})',
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
                 ),
-              ).then((_) => _loadDownloads());
-            },
-            onStream: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) =>
-                      StreamScreen(filePath: video.path, title: title),
+                ...activeTasks.map(
+                  (task) => Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 4,
+                    ),
+                    child: DownloadProgressTile(
+                      title: task.title,
+                      progress: task.progress,
+                      downloadedBytes: task.downloadedBytes,
+                      totalBytes: task.totalBytes,
+                      speed: task.currentSpeed,
+                      onCancel: () => DownloadManager().cancelDownload(task.id),
+                    ),
+                  ),
                 ),
-              );
-            },
-            onDelete: () => _deleteDownload(video.path),
-            onAddToPlaylist: () => _addToPlaylist(title, video.path),
-          );
-        },
-      ),
+                const SizedBox(height: 16),
+              ],
+
+              if (history.isNotEmpty) ...[
+                Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 8,
+                  ),
+                  child: Text(
+                    'History (${history.length})',
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+                ...history.map((item) {
+                  return VideoTile(
+                    title: item.title,
+                    filePath: item.filePath,
+                    onPlay: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => PlayerScreen(
+                            filePath: item.filePath,
+                            title: item.title,
+                            youtubeUrl: item.youtubeUrl,
+                          ),
+                        ),
+                      ).then((_) => _loadDownloads());
+                    },
+                    onStream: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => StreamScreen(
+                            filePath: item.filePath,
+                            title: item.title,
+                          ),
+                        ),
+                      );
+                    },
+                    onDelete: () => _deleteDownload(item.filePath, item.id),
+                    onAddToPlaylist: () =>
+                        _addToPlaylist(item.title, item.filePath),
+                  );
+                }),
+              ],
+            ],
+          ),
+        );
+      },
     );
   }
 

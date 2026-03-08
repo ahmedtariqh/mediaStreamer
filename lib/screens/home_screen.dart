@@ -1,11 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import '../models/download_task.dart';
 import '../models/stream_info_item.dart';
 import '../models/youtube_link.dart';
 import '../services/database_service.dart';
 import '../services/youtube_service.dart';
-import '../services/download_notification_service.dart';
+import '../services/download_manager.dart';
 import '../widgets/download_progress_tile.dart';
 import '../widgets/format_picker_sheet.dart';
 
@@ -23,17 +22,7 @@ class HomeScreenState extends State<HomeScreen>
   late TextEditingController _urlController;
   final _youtubeService = YoutubeService();
   bool _isFetching = false;
-  bool _isDownloading = false;
-  DownloadTask? _activeDownload;
   String? _errorMessage;
-
-  // Download stats
-  int _downloadedBytes = 0;
-  int _totalBytes = 0;
-  double _downloadSpeed = 0;
-
-  // Notification ID counter
-  int _notifId = 100;
 
   late AnimationController _pulseController;
   late Animation<double> _pulseAnimation;
@@ -107,7 +96,7 @@ class HomeScreenState extends State<HomeScreen>
       );
 
       if (selected != null && mounted) {
-        _startDownload(url, selected);
+        _startDownload(url, selected, video.title);
       }
     } catch (e) {
       if (mounted) {
@@ -119,123 +108,50 @@ class HomeScreenState extends State<HomeScreen>
     }
   }
 
-  Future<void> _startDownload(String url, StreamInfoItem stream) async {
-    final notifId = _notifId++;
+  Future<void> _startDownload(
+    String url,
+    StreamInfoItem stream,
+    String title,
+  ) async {
     setState(() {
-      _isDownloading = true;
       _errorMessage = null;
-      _downloadedBytes = 0;
-      _totalBytes = stream.sizeBytes;
-      _downloadSpeed = 0;
-      _activeDownload = DownloadTask(
-        videoId: '',
-        title: 'Downloading...',
-        thumbnailUrl: '',
-        youtubeUrl: url,
-        status: DownloadStatus.downloading,
-      );
     });
 
     try {
-      final task = await _youtubeService.downloadStream(
-        url,
-        stream,
-        onProgress: (progress, downloaded, total, speed) {
-          if (mounted) {
-            setState(() {
-              _activeDownload = _activeDownload?..progress = progress;
-              _downloadedBytes = downloaded;
-              _totalBytes = total;
-              _downloadSpeed = speed;
-            });
-          }
+      await DownloadManager().startDownload(url, stream);
 
-          // Update notification progress
-          final percent = (progress * 100).clamp(0, 100).toInt();
-          final speedStr = _formatSpeed(speed);
-          DownloadNotificationService.showProgress(
-            id: notifId,
-            title: _activeDownload?.title ?? 'Downloading...',
-            progress: percent,
-            body: '$percent% • $speedStr',
-          );
-        },
+      // Save link immediately so it appears in notes/links
+      await DatabaseService.saveLink(
+        YoutubeLink(
+          url: url,
+          title: title,
+          notes: 'Started download',
+          dateAdded: DateTime.now(),
+        ),
       );
 
       if (mounted) {
-        setState(() {
-          _activeDownload = task;
-          _isDownloading = false;
-        });
-
-        if (task.status == DownloadStatus.completed) {
-          _urlController.clear();
-
-          // Persist the YouTube link so it appears in JSON exports & webhooks
-          await DatabaseService.saveLink(
-            YoutubeLink(
-              url: task.youtubeUrl,
-              title: task.title,
-              notes: 'Downloaded: ${task.filePath.split('/').last}',
-              dateAdded: DateTime.now(),
-            ),
-          );
-
-          // Show completion notification
-          DownloadNotificationService.showComplete(
-            id: notifId,
-            title: task.title,
-            filePath: task.filePath,
-          );
-
-          if (!mounted) return;
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Downloaded: ${task.title}'),
-              backgroundColor: Colors.green.shade700,
-            ),
-          );
-        } else if (task.status == DownloadStatus.failed) {
-          // Show failure notification
-          DownloadNotificationService.showFailed(
-            id: notifId,
-            title: task.title,
-            error: task.errorMessage,
-          );
-
-          setState(
-            () => _errorMessage =
-                '${task.errorMessage ?? 'Download failed'}\nPartial file kept — tap "Retry" to try again.',
-          );
-        }
+        _urlController.clear();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Downloading: $title\nCheck Library tab.'),
+            backgroundColor: Colors.green.shade700,
+          ),
+        );
       }
     } catch (e) {
       if (mounted) {
-        DownloadNotificationService.showFailed(
-          id: notifId,
-          title: 'Download',
-          error: e.toString(),
-        );
         setState(() {
-          _isDownloading = false;
-          _errorMessage = 'Error: ${e.toString()}\nTap "Retry" to try again.';
+          _errorMessage = 'Download Error: ${e.toString()}';
         });
       }
     }
-  }
-
-  String _formatSpeed(double bytesPerSec) {
-    if (bytesPerSec < 1024) return '${bytesPerSec.toInt()} B/s';
-    if (bytesPerSec < 1048576) {
-      return '${(bytesPerSec / 1024).toStringAsFixed(1)} KB/s';
-    }
-    return '${(bytesPerSec / 1048576).toStringAsFixed(1)} MB/s';
   }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final isBusy = _isFetching || _isDownloading;
+    final isBusy = _isFetching;
 
     return Scaffold(
       appBar: AppBar(
@@ -340,7 +256,7 @@ class HomeScreenState extends State<HomeScreen>
 
             const SizedBox(height: 16),
 
-            // Fetch / Download button
+            // Fetch button
             ElevatedButton.icon(
               onPressed: isBusy ? null : _fetchAndPickFormat,
               icon: isBusy
@@ -354,11 +270,7 @@ class HomeScreenState extends State<HomeScreen>
                     )
                   : const Icon(Icons.search),
               label: Text(
-                _isFetching
-                    ? 'Fetching formats...'
-                    : _isDownloading
-                    ? 'Downloading...'
-                    : 'Fetch & Choose Format',
+                _isFetching ? 'Fetching formats...' : 'Fetch & Choose Format',
               ),
               style: ElevatedButton.styleFrom(
                 padding: const EdgeInsets.symmetric(vertical: 16),
@@ -396,20 +308,47 @@ class HomeScreenState extends State<HomeScreen>
               ),
             ],
 
-            // Active download progress
-            if (_activeDownload != null &&
-                _activeDownload!.status == DownloadStatus.downloading) ...[
-              const SizedBox(height: 20),
-              DownloadProgressTile(
-                title: _activeDownload!.title,
-                progress: _activeDownload!.progress,
-                downloadedBytes: _downloadedBytes,
-                totalBytes: _totalBytes,
-                speed: _downloadSpeed,
-              ),
-            ],
+            const SizedBox(height: 20),
 
-            const SizedBox(height: 40),
+            // Active downloads section
+            ListenableBuilder(
+              listenable: DownloadManager(),
+              builder: (context, _) {
+                final tasks = DownloadManager().activeTasks;
+                if (tasks.isEmpty) return const SizedBox.shrink();
+
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 12, left: 4),
+                      child: Text(
+                        'Active Downloads (${tasks.length})',
+                        style: theme.textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                    ...tasks.map(
+                      (task) => Padding(
+                        padding: const EdgeInsets.only(bottom: 12),
+                        child: DownloadProgressTile(
+                          title: task.title,
+                          progress: task.progress,
+                          downloadedBytes: task.downloadedBytes,
+                          totalBytes: task.totalBytes,
+                          speed: task.currentSpeed,
+                          onCancel: () =>
+                              DownloadManager().cancelDownload(task.id),
+                        ),
+                      ),
+                    ),
+                  ],
+                );
+              },
+            ),
+
+            const SizedBox(height: 20),
 
             // Quick tips section
             Container(

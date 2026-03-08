@@ -13,9 +13,34 @@ import 'screens/player_screen.dart';
 import 'services/database_service.dart';
 import 'services/local_media_service.dart';
 import 'services/webhook_service.dart';
+import 'services/download_manager.dart';
+import 'screens/share_popup_screen.dart';
 
-void main() {
+@pragma('vm:entry-point')
+void mainShare() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await DownloadManager().init();
+  runApp(const ShareApp());
+}
+
+class ShareApp extends StatelessWidget {
+  const ShareApp({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      debugShowCheckedModeBanner: false,
+      theme: AppTheme.darkTheme.copyWith(
+        scaffoldBackgroundColor: Colors.transparent,
+      ),
+      home: const SharePopupScreen(),
+    );
+  }
+}
+
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await DownloadManager().init();
   runApp(const MediaStreamerApp());
 }
 
@@ -277,7 +302,14 @@ class _MainNavigationState extends State<MainNavigation> {
           const LibraryScreen(),
           const LinksScreen(),
           const PlaylistsScreen(),
-          const MoreScreen(),
+          MoreScreen(
+            onUrlDetected: (url) {
+              setState(() => _currentIndex = 0);
+              Future.delayed(const Duration(milliseconds: 300), () {
+                _homeKey.currentState?.fetchAndPickFormatFromUrl(url);
+              });
+            },
+          ),
         ],
       ),
       bottomNavigationBar: Container(

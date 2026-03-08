@@ -31,7 +31,13 @@
 - **Real-time progress bar** with download speed and ETA.
 - Saves to the public `Downloads/MediaStreamer` folder visible to other apps.
 - **Background download notifications** so you can leave the app while downloading.
+- **Robust Download Manager**: Pause, resume, cancel, and prevent duplicates mid-flight.
 - Auto-scans Android MediaStore after download.
+
+### 🌐 Ad-Blocking Web Browser
+- Built-in private web browser accessible from the "More" tab.
+- Automatically blocks known ad networks, trackers, and popup windows.
+- **Smart Link Detection** — detects when you navigate to a YouTube video and routes it instantly to the downloader.
 
 ### 📡 LAN Streaming
 - **Stream any local video** to other devices on the same Wi-Fi network.
@@ -65,7 +71,7 @@
 
 ### 🔗 Share Intent Integration
 - Share a YouTube link **from any app** directly into MediaStreamer.
-- The format picker opens automatically — pick quality and download instantly.
+- **Seamless Share Overlay**: When sharing from YouTube, MediaStreamer opens a transparent popup rather than forcing you to leave YouTube! Just pick a video quality and it will close automatically while downloading in the background.
 
 ### 🎨 Modern UI
 - Sleek **dark theme** with gradient accents.
@@ -141,6 +147,14 @@ This project is licensed under the **MediaStreamer Non-Commercial License**.
 - ✅ Only **Tau Automation** is authorized to use this software commercially.
 
 See [LICENSE](LICENSE) for full details.
+
+---
+
+## ☕ Support the Project
+
+If you find MediaStreamer useful and would like to support its continued development, consider buying me a coffee! 
+
+<a href="https://buymeacoffee.com/ahmedtariqh" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" style="height: 60px !important;width: 217px !important;" ></a>
 
 ---
 

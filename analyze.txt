@@ -1,0 +1,4 @@
+Analyzing mediaStreamer...                                      
+
+   info - Statements in an if should be enclosed in a block - lib\screens\share_popup_screen.dart:91:9 - curly_braces_in_flow_control_structures
+
