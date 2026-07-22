@@ -29,16 +29,6 @@ class DownloadManager extends ChangeNotifier {
 
   Future<void> init() async {
     await _loadHistory();
-    // ponytail: setup simple wake lock for background downloads
-    const androidConfig = FlutterBackgroundAndroidConfig(
-      notificationTitle: "MediaStreamer Downloading",
-      notificationText: "Downloading files in background",
-      notificationImportance: AndroidNotificationImportance.normal,
-      notificationIcon: AndroidResource(name: 'launcher_icon', defType: 'mipmap'),
-    );
-    try {
-      await FlutterBackground.initialize(androidConfig: androidConfig);
-    } catch (_) {}
   }
 
   Future<void> _loadHistory() async {
@@ -95,16 +85,8 @@ class DownloadManager extends ChangeNotifier {
   }
 
   Future<void> startDownload(String url, StreamInfoItem selectedStream) async {
-    // Check for duplicates
-    final existingHistory = _history
-        .where((item) => item.youtubeUrl == url)
-        .toList();
-    if (existingHistory.isNotEmpty) {
-      final item = existingHistory.first;
-      if (item.fileExists) {
-        throw Exception('File already downloaded.');
-      }
-    }
+    // We now rely on the disk file check below to prevent duplicates,
+    // which correctly differentiates between .mp4 and .m4a versions of the same video.
 
     // if task is already downloading
     if (_activeDownloads.values.any(
@@ -168,6 +150,13 @@ class DownloadManager extends ChangeNotifier {
     // Enable background
     try {
       if (!FlutterBackground.isBackgroundExecutionEnabled) {
+        const androidConfig = FlutterBackgroundAndroidConfig(
+          notificationTitle: "MediaStreamer Downloading",
+          notificationText: "Downloading files in background",
+          notificationImportance: AndroidNotificationImportance.normal,
+          notificationIcon: AndroidResource(name: 'launcher_icon', defType: 'mipmap'),
+        );
+        await FlutterBackground.initialize(androidConfig: androidConfig);
         await FlutterBackground.enableBackgroundExecution();
       }
     } catch (_) {}

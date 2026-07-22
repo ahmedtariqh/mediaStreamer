@@ -1,4 +1,8 @@
+import 'dart:typed_data';
+import 'package:get_thumbnail_video/index.dart';
+import 'package:get_thumbnail_video/video_thumbnail.dart';
 import 'package:flutter/material.dart';
+import 'audio_player_screen.dart';
 import 'package:intl/intl.dart';
 import '../models/folder_item.dart';
 import '../services/local_media_service.dart';
@@ -434,13 +438,22 @@ class _FolderBrowserScreenState extends State<FolderBrowserScreen> {
   }
 
   void _play(MediaFile file) {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) =>
-            PlayerScreen(filePath: file.path, title: file.name, youtubeUrl: ''),
-      ),
-    );
+    if (file.type == MediaFileType.audio) {
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => AudioPlayerScreen(filePath: file.path, title: file.name),
+        ),
+      );
+    } else {
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) =>
+              PlayerScreen(filePath: file.path, title: file.name, youtubeUrl: ''),
+        ),
+      );
+    }
   }
 
   void _stream(MediaFile file) {
@@ -466,14 +479,27 @@ class _FolderBrowserScreenState extends State<FolderBrowserScreen> {
   }
 }
 
-// ponytail: Use original YouTube thumbnail instead of extracting frames.
-// Parses videoId from filename pattern: {videoId}_title.ext
-class VideoThumbnailWidget extends StatelessWidget {
+// ponytail: Use original YouTube thumbnail if available, otherwise generate local thumbnail.
+class VideoThumbnailWidget extends StatefulWidget {
   final String path;
   const VideoThumbnailWidget({super.key, required this.path});
 
+  @override
+  State<VideoThumbnailWidget> createState() => _VideoThumbnailWidgetState();
+}
+
+class _VideoThumbnailWidgetState extends State<VideoThumbnailWidget> {
+  Uint8List? _localThumb;
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadThumbnail();
+  }
+
   String? _extractVideoId() {
-    final fileName = path.split('/').last;
+    final fileName = widget.path.split('/').last;
     final underscoreIndex = fileName.indexOf('_');
     if (underscoreIndex > 0) {
       final candidate = fileName.substring(0, underscoreIndex);
@@ -485,22 +511,68 @@ class VideoThumbnailWidget extends StatelessWidget {
     return null;
   }
 
+  Future<void> _loadThumbnail() async {
+    if (_extractVideoId() != null) {
+      if (mounted) setState(() => _loading = false);
+      return; // Uses network image
+    }
+
+    try {
+      final uint8list = await VideoThumbnail.thumbnailData(
+        video: widget.path,
+        imageFormat: ImageFormat.JPEG,
+        maxWidth: 128,
+        quality: 50,
+      );
+      if (mounted) {
+        setState(() {
+          _localThumb = uint8list;
+          _loading = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final videoId = _extractVideoId();
-    if (videoId == null) {
-      return Icon(Icons.videocam, color: Theme.of(context).colorScheme.primary);
+    if (videoId != null) {
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(10),
+        child: Image.network(
+          'https://img.youtube.com/vi/$videoId/0.jpg',
+          fit: BoxFit.cover,
+          width: double.infinity,
+          height: double.infinity,
+          errorBuilder: (_, __, ___) => Icon(Icons.videocam, color: Theme.of(context).colorScheme.primary),
+        ),
+      );
     }
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(10),
-      child: Image.network(
-        'https://img.youtube.com/vi/$videoId/0.jpg',
-        fit: BoxFit.cover,
-        width: double.infinity,
-        height: double.infinity,
-        errorBuilder: (_, __, ___) =>
-            Icon(Icons.videocam, color: Theme.of(context).colorScheme.primary),
-      ),
-    );
+
+    if (_loading) {
+      return Center(
+        child: SizedBox(
+          width: 20,
+          height: 20,
+          child: CircularProgressIndicator(strokeWidth: 2),
+        ),
+      );
+    }
+
+    if (_localThumb != null) {
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(10),
+        child: Image.memory(
+          _localThumb!,
+          fit: BoxFit.cover,
+          width: double.infinity,
+          height: double.infinity,
+        ),
+      );
+    }
+
+    return Icon(Icons.videocam, color: Theme.of(context).colorScheme.primary);
   }
 }

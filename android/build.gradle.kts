@@ -23,14 +23,19 @@ subprojects {
 
 subprojects {
     tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {
-        val pName = project.name
-        compilerOptions.jvmTarget.set(
-            when (pName) {
-                "receive_sharing_intent" -> org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_1_8
-                "bonsoir_android" -> org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_11
-                else -> org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17
-            }
-        )
+        val target = project.extensions.findByType(com.android.build.gradle.BaseExtension::class.java)
+            ?.compileOptions?.targetCompatibility?.toString()
+        if (target != null) {
+            compilerOptions.jvmTarget.set(
+                when (target) {
+                    "1.8" -> org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_1_8
+                    "11" -> org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_11
+                    else -> org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17
+                }
+            )
+        } else {
+            compilerOptions.jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
+        }
     }
 }
 

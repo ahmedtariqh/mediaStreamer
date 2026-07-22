@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'audio_player_screen.dart';
 import 'package:intl/intl.dart';
 import 'package:permission_handler/permission_handler.dart';
 import '../services/local_media_service.dart';
@@ -647,12 +648,12 @@ class _LibraryScreenState extends State<LibraryScreen>
                     .withValues(alpha: 0.15),
             borderRadius: BorderRadius.circular(10),
           ),
-          child: Icon(
-            isVideo ? Icons.videocam : Icons.audiotrack,
-            color: isVideo
-                ? theme.colorScheme.primary
-                : theme.colorScheme.secondary,
-          ),
+          child: isVideo
+              ? VideoThumbnailWidget(path: media.path)
+              : Icon(
+                  Icons.audiotrack,
+                  color: theme.colorScheme.secondary,
+                ),
         ),
         title: Text(
           media.name,
@@ -680,16 +681,28 @@ class _LibraryScreenState extends State<LibraryScreen>
               icon: const Icon(Icons.play_circle_fill, size: 32),
               color: theme.colorScheme.primary,
               onPressed: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => PlayerScreen(
-                      filePath: media.path,
-                      title: media.name,
-                      youtubeUrl: '',
+                if (!isVideo) {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => AudioPlayerScreen(
+                        filePath: media.path,
+                        title: media.name,
+                      ),
                     ),
-                  ),
-                );
+                  );
+                } else {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => PlayerScreen(
+                        filePath: media.path,
+                        title: media.name,
+                        youtubeUrl: '',
+                      ),
+                    ),
+                  );
+                }
               },
               tooltip: 'Play',
             ),

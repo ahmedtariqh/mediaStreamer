@@ -389,9 +389,33 @@ class _PlayerScreenState extends State<PlayerScreen> {
   }
 
   void _handleDoubleTap(TapDownDetails details, double screenWidth) {
-    if (_isLocked) return;
+    if (_isLocked || _controller == null) return;
     final x = details.globalPosition.dx;
-    final side = x < screenWidth / 2 ? -1 : 1;
+    
+    // Define the middle 30% of the screen for play/pause
+    final middleZone = screenWidth * 0.3;
+    final leftBound = (screenWidth - middleZone) / 2;
+    final rightBound = leftBound + middleZone;
+    
+    if (x > leftBound && x < rightBound) {
+      _togglePlay();
+      setState(() {
+        _gestureIcon = _controller!.value.isPlaying ? Icons.play_arrow : Icons.pause;
+        _gestureText = _controller!.value.isPlaying ? 'Playing' : 'Paused';
+      });
+      _doubleTapTimer?.cancel();
+      _doubleTapTimer = Timer(const Duration(milliseconds: 800), () {
+        if (mounted) {
+          setState(() {
+            _gestureText = null;
+            _gestureIcon = null;
+          });
+        }
+      });
+      return;
+    }
+
+    final side = x < leftBound ? -1 : 1;
 
     if (_doubleTapSide == side) {
       _doubleTapCount++;

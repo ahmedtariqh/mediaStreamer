@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:just_audio_background/just_audio_background.dart';
 import 'package:audio_session/audio_session.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -42,11 +43,30 @@ class ShareApp extends StatelessWidget {
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   
-  // ponytail: Configure audio session for background and Bluetooth routing without foreground service boilerplate.
-  final session = await AudioSession.instance;
-  await session.configure(const AudioSessionConfiguration.music());
+  try {
+    await JustAudioBackground.init(
+      androidNotificationChannelId: 'com.ryanheise.bg_demo.channel.audio',
+      androidNotificationChannelName: 'Audio playback',
+      androidNotificationOngoing: true,
+      androidNotificationIcon: 'mipmap/launcher_icon',
+    );
+  } catch (e) {
+    debugPrint('JustAudioBackground init error: $e');
+  }
 
-  await DownloadManager().init();
+  try {
+    final session = await AudioSession.instance;
+    await session.configure(const AudioSessionConfiguration.music());
+  } catch (e) {
+    debugPrint('AudioSession init error: $e');
+  }
+
+  try {
+    await DownloadManager().init();
+  } catch (e) {
+    debugPrint('DownloadManager init error: $e');
+  }
+
   runApp(const MediaStreamerApp());
 }
 
