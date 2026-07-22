@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:audio_session/audio_session.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:receive_sharing_intent/receive_sharing_intent.dart';
@@ -40,6 +41,11 @@ class ShareApp extends StatelessWidget {
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  
+  // ponytail: Configure audio session for background and Bluetooth routing without foreground service boilerplate.
+  final session = await AudioSession.instance;
+  await session.configure(const AudioSessionConfiguration.music());
+
   await DownloadManager().init();
   runApp(const MediaStreamerApp());
 }

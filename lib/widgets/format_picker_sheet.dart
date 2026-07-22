@@ -18,12 +18,9 @@ class FormatPickerSheet extends StatelessWidget {
     final theme = Theme.of(context);
 
     final muxed = streams.where((s) => s.type == StreamType.muxed).toList();
-    final videoOnly = streams
-        .where((s) => s.type == StreamType.videoOnly)
-        .toList();
-    final audioOnly = streams
-        .where((s) => s.type == StreamType.audioOnly)
-        .toList();
+    // ponytail: keep video-only removed (needs ffmpeg merge), but re-enable audio-only (standalone playable).
+    final videoOnly = <StreamInfoItem>[];
+    final audioOnly = streams.where((s) => s.type == StreamType.audioOnly).toList();
 
     return DraggableScrollableSheet(
       initialChildSize: 0.75,

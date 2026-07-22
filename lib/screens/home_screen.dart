@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import '../models/download_task.dart';
 import '../models/stream_info_item.dart';
 import '../models/youtube_link.dart';
 import '../services/database_service.dart';
@@ -315,11 +316,13 @@ class HomeScreenState extends State<HomeScreen>
               listenable: DownloadManager(),
               builder: (context, _) {
                 final tasks = DownloadManager().activeTasks;
-                if (tasks.isEmpty) return const SizedBox.shrink();
+                final history = DownloadManager().history;
+                if (tasks.isEmpty && history.isEmpty) return const SizedBox.shrink();
 
                 return Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    if (tasks.isNotEmpty) ...[
                     Padding(
                       padding: const EdgeInsets.only(bottom: 12, left: 4),
                       child: Text(
@@ -338,11 +341,86 @@ class HomeScreenState extends State<HomeScreen>
                           downloadedBytes: task.downloadedBytes,
                           totalBytes: task.totalBytes,
                           speed: task.currentSpeed,
+                          isPaused: task.status == DownloadStatus.paused,
                           onCancel: () =>
                               DownloadManager().cancelDownload(task.id),
+                          onPause: () => DownloadManager().pauseDownload(task.id),
+                          onResume: () => DownloadManager().resumeDownload(task.id),
                         ),
                       ),
                     ),
+                    ],
+
+                    if (history.isNotEmpty) ...[
+                      const SizedBox(height: 16),
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 12, left: 4),
+                        child: Text(
+                          'Download History',
+                          style: theme.textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                      ...history.map(
+                        (item) => ListTile(
+                          contentPadding: EdgeInsets.zero,
+                          leading: item.thumbnailUrl.isNotEmpty
+                              ? ClipRRect(
+                                  borderRadius: BorderRadius.circular(4),
+                                  child: Image.network(
+                                    item.thumbnailUrl,
+                                    width: 60,
+                                    height: 45,
+                                    fit: BoxFit.cover,
+                                    errorBuilder: (_, __, ___) => const Icon(Icons.video_file),
+                                  ),
+                                )
+                              : const Icon(Icons.video_file),
+                          title: Text(
+                            item.title,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.bodyMedium,
+                          ),
+                          subtitle: Text(
+                            item.fileExists ? 'Downloaded' : 'File missing',
+                            style: TextStyle(
+                              color: item.fileExists ? Colors.green : Colors.redAccent,
+                              fontSize: 12,
+                            ),
+                          ),
+                          trailing: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              IconButton(
+                                icon: const Icon(Icons.copy, size: 20),
+                                tooltip: 'Copy Link',
+                                onPressed: () {
+                                  Clipboard.setData(ClipboardData(text: item.youtubeUrl));
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(content: Text('Link copied to clipboard')),
+                                  );
+                                },
+                              ),
+                              IconButton(
+                                icon: const Icon(Icons.refresh, size: 20),
+                                tooltip: 'Redownload',
+                                onPressed: () {
+                                  _urlController.text = item.youtubeUrl;
+                                  _fetchAndPickFormat();
+                                },
+                              ),
+                              IconButton(
+                                icon: const Icon(Icons.delete_outline, size: 20),
+                                tooltip: 'Remove from history',
+                                onPressed: () => DownloadManager().removeHistoryItem(item.id),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
                   ],
                 );
               },

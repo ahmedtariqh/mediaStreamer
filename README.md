@@ -138,6 +138,21 @@ The release APK will be located at `build/app/outputs/flutter-apk/app-release.ap
 
 ---
 
+## 📋 Plan
+
+Here is the prioritized list of enhancements to apply:
+- [ ] View original thumbnails on the file
+- [ ] When screen is locked, continue playing, expose controls on lock screen
+- [ ] Auto rotate by default, regardless of phone settings
+- [ ] True background download
+- [ ] Continuous touch: playback speed 2x
+- [ ] In download pop-up: remove non-practical formats, make sure they actually work
+- [ ] Download history, options to pause, resume, redownload, copy link
+- [ ] Download duplicate detection and handling
+- [ ] Fix: sound doesn't work with Bluetooth devices
+
+---
+
 ## 📄 License
 
 This project is licensed under the **MediaStreamer Non-Commercial License**.

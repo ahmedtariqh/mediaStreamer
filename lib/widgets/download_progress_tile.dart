@@ -7,7 +7,10 @@ class DownloadProgressTile extends StatelessWidget {
   final int downloadedBytes;
   final int totalBytes;
   final double speed;
+  final bool isPaused;
   final VoidCallback? onCancel;
+  final VoidCallback? onPause;
+  final VoidCallback? onResume;
 
   const DownloadProgressTile({
     super.key,
@@ -16,7 +19,10 @@ class DownloadProgressTile extends StatelessWidget {
     this.downloadedBytes = 0,
     this.totalBytes = 0,
     this.speed = 0,
+    this.isPaused = false,
     this.onCancel,
+    this.onPause,
+    this.onResume,
   });
 
   String _formatSpeed(double bytesPerSec) {
@@ -71,6 +77,18 @@ class DownloadProgressTile extends StatelessWidget {
                     overflow: TextOverflow.ellipsis,
                   ),
                 ),
+                if (onPause != null && !isPaused)
+                  IconButton(
+                    icon: const Icon(Icons.pause, size: 20),
+                    onPressed: onPause,
+                    color: Colors.white70,
+                  ),
+                if (onResume != null && isPaused)
+                  IconButton(
+                    icon: const Icon(Icons.play_arrow, size: 20),
+                    onPressed: onResume,
+                    color: Colors.white70,
+                  ),
                 if (onCancel != null)
                   IconButton(
                     icon: const Icon(Icons.close, size: 20),

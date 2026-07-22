@@ -70,10 +70,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
   void initState() {
     super.initState();
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+    // ponytail: Force landscape for video player as minimum viable auto-rotate.
     SystemChrome.setPreferredOrientations([
       DeviceOrientation.landscapeLeft,
       DeviceOrientation.landscapeRight,
-      DeviceOrientation.portraitUp,
     ]);
 
     _initPlayer();
@@ -93,6 +93,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
       if (effectivePath.startsWith('http')) {
         _controller = VideoPlayerController.networkUrl(
           Uri.parse(effectivePath),
+          videoPlayerOptions: VideoPlayerOptions(mixWithOthers: true),
         );
       } else {
         // Check if the file exists
@@ -104,7 +105,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
           });
           return;
         }
-        _controller = VideoPlayerController.file(file);
+        _controller = VideoPlayerController.file(
+          file,
+          videoPlayerOptions: VideoPlayerOptions(mixWithOthers: true),
+        );
       }
 
       _controller!
@@ -690,6 +694,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
                 onDoubleTapDown: (details) =>
                     _handleDoubleTap(details, screenSize.width),
                 onDoubleTap: () {},
+                onLongPressStart: (_) => _setSpeed(2.0),
+                onLongPressEnd: (_) => _setSpeed(1.0),
                 onVerticalDragStart: (d) =>
                     _onVerticalDragStart(d, screenSize.width),
                 onVerticalDragUpdate: (d) =>

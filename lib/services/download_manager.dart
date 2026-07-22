@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter_background/flutter_background.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/download_history.dart';
@@ -28,6 +29,16 @@ class DownloadManager extends ChangeNotifier {
 
   Future<void> init() async {
     await _loadHistory();
+    // ponytail: setup simple wake lock for background downloads
+    const androidConfig = FlutterBackgroundAndroidConfig(
+      notificationTitle: "MediaStreamer Downloading",
+      notificationText: "Downloading files in background",
+      notificationImportance: AndroidNotificationImportance.normal,
+      notificationIcon: AndroidResource(name: 'launcher_icon', defType: 'mipmap'),
+    );
+    try {
+      await FlutterBackground.initialize(androidConfig: androidConfig);
+    } catch (_) {}
   }
 
   Future<void> _loadHistory() async {
@@ -117,15 +128,28 @@ class DownloadManager extends ChangeNotifier {
       await videosDir.create(recursive: true);
     }
 
-    final ext = selectedStream.type == StreamType.audioOnly
-        ? '.${selectedStream.container}'
-        : '.mp4';
+    // ponytail: use correct playable extensions for audio-only downloads.
+    // youtube_explode returns container 'mp4' for AAC audio → save as .m4a
+    // youtube_explode returns container 'webm' for Opus audio → save as .webm (or .ogg)
+    final String ext;
+    if (selectedStream.type == StreamType.audioOnly) {
+      final container = selectedStream.container.toLowerCase();
+      ext = container == 'mp4' ? '.m4a' : '.$container';
+    } else {
+      ext = '.mp4';
+    }
 
     final sanitizedTitle = video.title
         .replaceAll(RegExp(r'[<>:"/\\|?*]'), '_')
         .substring(0, video.title.length.clamp(0, 80));
     final filePath = '${videosDir.path}/${video.id}_$sanitizedTitle$ext';
     final file = File(filePath);
+    
+    // ponytail: check disk directly to prevent duplicates even if history was cleared.
+    if (await file.exists()) {
+      throw Exception('File already exists on disk.');
+    }
+
     final fileSink = file.openWrite();
 
     final task = DownloadTask(
@@ -140,6 +164,14 @@ class DownloadManager extends ChangeNotifier {
 
     _activeDownloads[task.id] = task;
     _sinks[task.id] = fileSink;
+    
+    // Enable background
+    try {
+      if (!FlutterBackground.isBackgroundExecutionEnabled) {
+        await FlutterBackground.enableBackgroundExecution();
+      }
+    } catch (_) {}
+    
     notifyListeners();
 
     var lastSpeedCalcTime = DateTime.now();
@@ -187,6 +219,7 @@ class DownloadManager extends ChangeNotifier {
 
         _addToHistory(task);
         _activeDownloads.remove(task.id);
+        _disableBackgroundIfNeeded();
         notifyListeners();
       },
       onError: (e) async {
@@ -203,12 +236,23 @@ class DownloadManager extends ChangeNotifier {
           title: task.title,
           error: e.toString(),
         );
+        _disableBackgroundIfNeeded();
         notifyListeners();
       },
       cancelOnError: true,
     );
 
     _subscriptions[task.id] = sub;
+  }
+
+  void _disableBackgroundIfNeeded() {
+    if (_activeDownloads.isEmpty) {
+      try {
+        if (FlutterBackground.isBackgroundExecutionEnabled) {
+          FlutterBackground.disableBackgroundExecution();
+        }
+      } catch (_) {}
+    }
   }
 
   Future<void> startGenericDownload(String url, String fileName) async {
@@ -245,6 +289,13 @@ class DownloadManager extends ChangeNotifier {
 
     _activeDownloads[task.id] = task;
     _sinks[task.id] = fileSink;
+    
+    try {
+      if (!FlutterBackground.isBackgroundExecutionEnabled) {
+        await FlutterBackground.enableBackgroundExecution();
+      }
+    } catch (_) {}
+    
     notifyListeners();
 
     try {
@@ -302,6 +353,7 @@ class DownloadManager extends ChangeNotifier {
 
           _addToHistory(task);
           _activeDownloads.remove(task.id);
+          _disableBackgroundIfNeeded();
           notifyListeners();
         },
         onError: (e) async {
@@ -318,6 +370,7 @@ class DownloadManager extends ChangeNotifier {
             title: task.title,
             error: e.toString(),
           );
+          _disableBackgroundIfNeeded();
           notifyListeners();
         },
         cancelOnError: true,
@@ -337,6 +390,7 @@ class DownloadManager extends ChangeNotifier {
         title: task.title,
         error: e.toString(),
       );
+      _disableBackgroundIfNeeded();
       notifyListeners();
     }
   }
@@ -388,6 +442,7 @@ class DownloadManager extends ChangeNotifier {
       }
 
       _activeDownloads.remove(id);
+      _disableBackgroundIfNeeded();
       notifyListeners();
     }
   }

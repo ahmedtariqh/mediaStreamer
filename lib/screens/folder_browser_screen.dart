@@ -383,12 +383,12 @@ class _FolderBrowserScreenState extends State<FolderBrowserScreen> {
                     .withValues(alpha: 0.15),
             borderRadius: BorderRadius.circular(10),
           ),
-          child: Icon(
-            isVideo ? Icons.videocam : Icons.audiotrack,
-            color: isVideo
-                ? theme.colorScheme.primary
-                : theme.colorScheme.secondary,
-          ),
+          child: isVideo
+              ? VideoThumbnailWidget(path: file.path)
+              : Icon(
+                  Icons.audiotrack,
+                  color: theme.colorScheme.secondary,
+                ),
         ),
         title: Text(
           file.name,
@@ -461,6 +461,45 @@ class _FolderBrowserScreenState extends State<FolderBrowserScreen> {
         itemTitle: file.name,
         itemPath: file.path,
         itemType: AddToPlaylistItemType.download,
+      ),
+    );
+  }
+}
+
+// ponytail: Use original YouTube thumbnail instead of extracting frames.
+// Parses videoId from filename pattern: {videoId}_title.ext
+class VideoThumbnailWidget extends StatelessWidget {
+  final String path;
+  const VideoThumbnailWidget({super.key, required this.path});
+
+  String? _extractVideoId() {
+    final fileName = path.split('/').last;
+    final underscoreIndex = fileName.indexOf('_');
+    if (underscoreIndex > 0) {
+      final candidate = fileName.substring(0, underscoreIndex);
+      // YouTube IDs are typically 11 chars
+      if (candidate.length >= 10 && candidate.length <= 12) {
+        return candidate;
+      }
+    }
+    return null;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final videoId = _extractVideoId();
+    if (videoId == null) {
+      return Icon(Icons.videocam, color: Theme.of(context).colorScheme.primary);
+    }
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(10),
+      child: Image.network(
+        'https://img.youtube.com/vi/$videoId/0.jpg',
+        fit: BoxFit.cover,
+        width: double.infinity,
+        height: double.infinity,
+        errorBuilder: (_, __, ___) =>
+            Icon(Icons.videocam, color: Theme.of(context).colorScheme.primary),
       ),
     );
   }
