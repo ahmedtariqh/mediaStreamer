@@ -238,4 +238,18 @@ void main() {
       null,
     );
   });
+  testWidgets('pages retain the bottom system inset without an active player', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: MediaQuery(
+          data: const MediaQueryData(padding: EdgeInsets.only(bottom: 24)),
+          child: MediaScaffold(body: const Text('Notes')),
+        ),
+      ),
+    );
+    expect(tester.getSize(find.byType(MiniPlayer)).height, 24);
+    expect(tester.takeException(), isNull);
+  });
 }

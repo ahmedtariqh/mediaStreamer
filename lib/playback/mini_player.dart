@@ -18,7 +18,11 @@ class MiniPlayer extends StatelessWidget {
     return ListenableBuilder(
       listenable: p,
       builder: (context, _) {
-        if (!p.visible) return const SizedBox.shrink();
+        if (!p.visible) {
+          return safeBottom
+              ? const SafeArea(top: false, child: SizedBox(height: 0))
+              : const SizedBox.shrink();
+        }
         return SafeArea(
           top: false,
           bottom: safeBottom,

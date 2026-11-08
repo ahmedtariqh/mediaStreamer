@@ -304,8 +304,34 @@ class PlaybackBridge(private val activity: MainActivity, engine: FlutterEngine) 
                     .takeIf { it.startsWith("content://") }
                     .orEmpty()
             }
-        val uri = uriText.takeIf { it.isNotEmpty() }?.let { Uri.parse(it) }
+        val providedUri = uriText.takeIf { it.isNotEmpty() }?.let { Uri.parse(it) }
         io.execute {
+            val uri =
+                providedUri
+                    ?: try {
+                        val path = op.second["uri"]?.toString().orEmpty()
+                        val collection = MediaStore.Files.getContentUri("external")
+                        if (!path.startsWith("/")) null
+                        else
+                            activity.contentResolver
+                                .query(
+                                    collection,
+                                    arrayOf(MediaStore.MediaColumns._ID),
+                                    "${MediaStore.MediaColumns.DATA} = ?",
+                                    arrayOf(path),
+                                    null,
+                                )
+                                ?.use {
+                                    if (it.moveToFirst())
+                                        android.content.ContentUris.withAppendedId(
+                                            collection,
+                                            it.getLong(0),
+                                        )
+                                    else null
+                                }
+                    } catch (_: Exception) {
+                        null
+                    }
             try {
                 var renamedPath: String? = null
                 if (uri != null) {
