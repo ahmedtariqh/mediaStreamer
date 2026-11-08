@@ -53,6 +53,8 @@ android {
 }
 
 dependencies {
+    implementation("org.videolan.android:libvlc-all:3.7.5")
+    implementation("androidx.media:media:1.7.0")
     implementation("io.github.junkfood02.youtubedl-android:library:0.18.1")
     implementation("io.github.junkfood02.youtubedl-android:ffmpeg:0.18.1")
     implementation("androidx.core:core-ktx:1.15.0")

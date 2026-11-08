@@ -1,3 +1,4 @@
+import '../playback/mini_player.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -164,7 +165,7 @@ class HomeScreenState extends State<HomeScreen>
     final theme = Theme.of(context);
     final isBusy = _isFetching;
 
-    return Scaffold(
+    return MediaScaffold(
       appBar: AppBar(
         title: Row(
           mainAxisSize: MainAxisSize.min,

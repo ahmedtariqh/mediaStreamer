@@ -1,3 +1,4 @@
+import '../playback/mini_player.dart';
 import 'package:flutter/material.dart';
 import '../models/playlist.dart';
 import '../services/database_service.dart';
@@ -137,7 +138,7 @@ class _PlaylistsScreenState extends State<PlaylistsScreen> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
-    return Scaffold(
+    return MediaScaffold(
       appBar: AppBar(title: const Text('Playlists')),
       floatingActionButton: FloatingActionButton(
         onPressed: _createPlaylist,

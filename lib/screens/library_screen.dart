@@ -1,3 +1,4 @@
+import '../playback/mini_player.dart';
 import 'package:flutter/material.dart';
 import 'audio_player_screen.dart';
 import 'package:intl/intl.dart';
@@ -247,7 +248,7 @@ class _LibraryScreenState extends State<LibraryScreen>
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
-    return Scaffold(
+    return MediaScaffold(
       appBar: AppBar(
         title: _isSearching
             ? TextField(
@@ -650,10 +651,7 @@ class _LibraryScreenState extends State<LibraryScreen>
           ),
           child: isVideo
               ? VideoThumbnailWidget(path: media.path)
-              : Icon(
-                  Icons.audiotrack,
-                  color: theme.colorScheme.secondary,
-                ),
+              : Icon(Icons.audiotrack, color: theme.colorScheme.secondary),
         ),
         title: Text(
           media.name,

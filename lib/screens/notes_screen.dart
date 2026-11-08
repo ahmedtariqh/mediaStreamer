@@ -1,3 +1,4 @@
+import '../playback/mini_player.dart';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
@@ -173,7 +174,7 @@ class _NotesScreenState extends State<NotesScreen> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
-    return Scaffold(
+    return MediaScaffold(
       appBar: AppBar(
         title: _isSearching
             ? TextField(

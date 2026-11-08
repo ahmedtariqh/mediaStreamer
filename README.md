@@ -20,10 +20,18 @@
 - Play **local videos &amp; audio** from device storage.
 - **Gesture controls** — swipe vertically for brightness/volume, horizontally to seek.
 - **Double-tap to skip** forward/backward (10 s).
-- **Playback speed** picker (0.25×–3.0×).
+- **Playback speed** picker (0.25×–8.0×) with per-track or global memory.
 - Controls **auto-hide** with configurable timer.
 - **Screen lock** to prevent accidental taps during playback.
-- Fullscreen landscape playback.
+- Fullscreen landscape playback and Android picture-in-picture.
+- **LibVLC 3.7.5** playback engine, one persistent video/audio session and a mini player throughout navigation.
+- Sleep timer with finish-track mode, 10-band equalizer, preamp and presets.
+- Subtitle files, audio/video/subtitle track selection, sync delays and chapters.
+- A–B loops, timeline bookmarks, jump to time, repeat and shuffle.
+- Editable playback queue, saved playlists and M3U/PLS import / M3U export.
+- Media notifications, lockscreen/headset controls, audio focus and headphone-unplug pause.
+- HTTP/RTSP/SMB/FTP/NFS/UDP media locations and LibVLC renderer discovery.
+- See [feature coverage and device checks](docs/PLAYBACK_UPGRADE.md) for limits; this is not a complete VLC Android port.
 
 ### ⬇️ Video & Audio Downloader
 - Paste or share public YouTube, Facebook, Instagram, TikTok, X/Twitter, Vimeo and other yt-dlp-supported video links. Availability depends on the site; login-required/DRM content is not supported.
@@ -51,6 +59,10 @@
 - **Search** files by name in real time.
 - **Sort** by name, date, or size (ascending/descending).
 - **Filter** by media type — video, audio, or all files.
+- Video folder collages, list/grid layouts, favorites and watched markers.
+- Audio artists/albums/tracks/genres, name/filename/duration/date/size sorting.
+- Lazy thumbnails with a 96-entry cache and two workers.
+- Multi-selection, queue actions, rename, delete, file sharing and metadata.
 - Tap-to-play any supported file.
 - Appears in Android's **"Open With"** menu for all media file types.
 
@@ -60,8 +72,8 @@
 - One-tap playback of the entire playlist.
 
 ### 📝 Video Notes
-- Prompted to write notes **after watching** (post-watch dialog).
-- Notes are tied to the video and include rating &amp; key highlights.
+- Prompted to write notes **after a single video**; notes remain available in the playback menu for queues.
+- Notes are tied to the video; save and keep or save and delete it.
 - **Export notes** as JSON for backup or sharing.
 
 ### 🔄 Resume Playback

@@ -1,3 +1,4 @@
+import '../playback/mini_player.dart';
 import 'dart:async';
 import 'package:bonsoir/bonsoir.dart';
 import 'package:flutter/material.dart';
@@ -130,7 +131,7 @@ class _ReceiverScreenState extends State<ReceiverScreen> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
-    return Scaffold(
+    return MediaScaffold(
       appBar: AppBar(
         title: const Text('Receive'),
         actions: [

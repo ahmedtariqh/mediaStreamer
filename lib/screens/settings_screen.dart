@@ -1,3 +1,6 @@
+import '../playback/media_preferences.dart';
+import '../playback/playback_controller.dart';
+import '../playback/mini_player.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/database_service.dart';
@@ -64,6 +67,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Future<void> _setResumePlayback(bool value) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('resumePlayback', value);
+    await MediaPreferences.instance.settings({'resume': value});
+    await PlaybackController.instance.command('settings', {'resume': value});
     setState(() => _resumePlayback = value);
   }
 
@@ -243,7 +248,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
-    return Scaffold(
+    return MediaScaffold(
       appBar: AppBar(title: const Text('Settings')),
       body: ListView(
         padding: const EdgeInsets.all(16),

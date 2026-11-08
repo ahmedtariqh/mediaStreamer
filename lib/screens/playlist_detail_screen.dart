@@ -1,9 +1,11 @@
+import '../playback/mini_player.dart';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import '../models/playlist.dart';
 import '../models/playlist_item.dart';
 import '../services/database_service.dart';
-import 'player_screen.dart';
+import '../playback/library_actions.dart';
+import '../playback/media_entry.dart';
 
 class PlaylistDetailScreen extends StatefulWidget {
   final Playlist playlist;
@@ -85,17 +87,27 @@ class _PlaylistDetailScreenState extends State<PlaylistDetailScreen> {
       return;
     }
 
-    Navigator.push(
+    final items = _playable;
+    LibraryActions.play(
       context,
-      MaterialPageRoute(
-        builder: (_) => PlayerScreen(
-          filePath: item.path,
-          title: item.title,
-          youtubeUrl: _extractYoutubeUrl(item.path),
-        ),
-      ),
+      items,
+      index: items
+          .indexWhere((m) => m.uri == item.path)
+          .clamp(0, items.length - 1),
     );
   }
+
+  List<MediaEntry> get _playable => _items
+      .where((m) => m.type != PlaylistItemType.youtubeLink && m.path.isNotEmpty)
+      .map(
+        (m) => MediaEntry(
+          uri: m.path,
+          title: m.title,
+          audio: MediaEntry.isAudio(m.path),
+          sourceUrl: _extractYoutubeUrl(m.path),
+        ),
+      )
+      .toList();
 
   Future<void> _onReorder(int oldIndex, int newIndex) async {
     setState(() {
@@ -111,10 +123,26 @@ class _PlaylistDetailScreenState extends State<PlaylistDetailScreen> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
-    return Scaffold(
+    return MediaScaffold(
       appBar: AppBar(
         title: Text(widget.playlist.name),
         actions: [
+          IconButton(
+            tooltip: 'Play all',
+            icon: const Icon(Icons.play_arrow),
+            onPressed: () => LibraryActions.play(context, _playable),
+          ),
+          IconButton(
+            tooltip: 'Shuffle all',
+            icon: const Icon(Icons.shuffle),
+            onPressed: () =>
+                LibraryActions.play(context, _playable, shuffle: true),
+          ),
+          IconButton(
+            tooltip: 'Export playlist',
+            icon: const Icon(Icons.ios_share),
+            onPressed: () => LibraryActions.exportPlaylist(context, _playable),
+          ),
           IconButton(
             icon: const Icon(Icons.refresh),
             onPressed: _loadItems,

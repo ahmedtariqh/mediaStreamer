@@ -99,6 +99,12 @@ internal object DownloadStore {
     fun hasRunning() = tasks.values.any { it.status in listOf("queued", "downloading") }
 
     @Synchronized
+    fun relocate(old: String, new: String) {
+        tasks.values.filter { it.filePath == old }.forEach { it.filePath = new }
+        persist()
+    }
+
+    @Synchronized
     fun remove(id: String) {
         val task = tasks[id] ?: return
         require(task.status !in listOf("queued", "downloading", "paused")) { "Cancel the download first." }

@@ -1,4 +1,8 @@
+import '../playback/mini_player.dart';
 import 'package:flutter/material.dart';
+import 'links_screen.dart';
+import 'library_screen.dart';
+import '../playback/library_actions.dart';
 import 'stream_screen.dart';
 import 'receiver_screen.dart';
 import 'notes_screen.dart';
@@ -14,12 +18,39 @@ class MoreScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
-    return Scaffold(
+    return MediaScaffold(
       appBar: AppBar(title: const Text('More')),
       body: Padding(
         padding: const EdgeInsets.all(20),
-        child: Column(
+        child: ListView(
           children: [
+            ListTile(
+              leading: const Icon(Icons.link),
+              title: const Text('Saved links'),
+              onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const LinksScreen()),
+              ),
+            ),
+            ListTile(
+              leading: const Icon(Icons.download_done),
+              title: const Text('Downloads & library'),
+              onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const LibraryScreen()),
+              ),
+            ),
+            ListTile(
+              leading: const Icon(Icons.public),
+              title: const Text('Open network stream'),
+              onTap: () => LibraryActions.network(context),
+            ),
+            ListTile(
+              leading: const Icon(Icons.playlist_add),
+              title: const Text('Import M3U / PLS playlist'),
+              onTap: () => LibraryActions.importPlaylist(context),
+            ),
+
             _buildOptionCard(
               context,
               theme,

@@ -1,3 +1,4 @@
+import 'package:flutter/services.dart';
 import 'dart:convert';
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
@@ -337,10 +338,45 @@ class DatabaseService {
       where: 'filePath = ?',
       whereArgs: [filePath],
     );
+    try {
+      await const MethodChannel(
+        'com.mediastreamer/player',
+      ).invokeMethod('forgetResume', {'uri': filePath});
+    } catch (_) {}
+  }
+
+  static Future<void> relocateMedia(String old, String path) async {
+    final db = await database;
+    await db.transaction((txn) async {
+      await txn.update(
+        'playlist_items',
+        {'path': path},
+        where: 'path = ?',
+        whereArgs: [old],
+      );
+      await txn.update(
+        'playback_positions',
+        {'filePath': path},
+        where: 'filePath = ?',
+        whereArgs: [old],
+        conflictAlgorithm: ConflictAlgorithm.replace,
+      );
+      await txn.update(
+        'video_notes',
+        {'youtubeUrl': path},
+        where: 'youtubeUrl = ?',
+        whereArgs: [old],
+      );
+    });
   }
 
   static Future<void> clearAllPlaybackPositions() async {
     final db = await database;
     await db.delete('playback_positions');
+    try {
+      await const MethodChannel(
+        'com.mediastreamer/player',
+      ).invokeMethod('clearResume');
+    } catch (_) {}
   }
 }

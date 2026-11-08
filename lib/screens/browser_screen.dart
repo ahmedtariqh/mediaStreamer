@@ -1,3 +1,4 @@
+import '../playback/mini_player.dart';
 import '../services/media_url.dart';
 
 import 'package:flutter/material.dart';
@@ -315,7 +316,7 @@ class _BrowserScreenState extends State<BrowserScreen> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
-    return Scaffold(
+    return MediaScaffold(
       appBar: AppBar(
         titleSpacing: 0,
         leading: IconButton(

@@ -1,7 +1,5 @@
 import 'dart:async';
 
-import 'package:just_audio_background/just_audio_background.dart';
-import 'package:audio_session/audio_session.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:receive_sharing_intent/receive_sharing_intent.dart';
@@ -9,8 +7,11 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'app_theme.dart';
 import 'screens/home_screen.dart';
-import 'screens/library_screen.dart';
-import 'screens/links_screen.dart';
+import 'playback/media_library_screen.dart';
+import 'screens/folder_browser_screen.dart';
+import 'playback/mini_player.dart';
+import 'playback/playback_controller.dart';
+import 'playback/media_preferences.dart';
 import 'screens/playlists_screen.dart';
 import 'screens/more_screen.dart';
 import 'screens/player_screen.dart';
@@ -24,23 +25,8 @@ import 'services/media_url.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  try {
-    await JustAudioBackground.init(
-      androidNotificationChannelId: 'com.ryanheise.bg_demo.channel.audio',
-      androidNotificationChannelName: 'Audio playback',
-      androidNotificationOngoing: true,
-      androidNotificationIcon: 'mipmap/launcher_icon',
-    );
-  } catch (e) {
-    debugPrint('JustAudioBackground init error: $e');
-  }
-
-  try {
-    final session = await AudioSession.instance;
-    await session.configure(const AudioSessionConfiguration.music());
-  } catch (e) {
-    debugPrint('AudioSession init error: $e');
-  }
+  await MediaPreferences.instance.load();
+  await PlaybackController.instance.init();
 
   try {
     await DownloadManager().init();
@@ -306,24 +292,28 @@ class _MainNavigationState extends State<MainNavigation> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return MediaScaffold(
       body: IndexedStack(
         index: _currentIndex,
         children: [
           HomeScreen(key: _homeKey),
           if (_visitedTabs.contains(1))
-            const LibraryScreen()
+            const MediaLibraryScreen(audio: false)
           else
             const SizedBox.shrink(),
           if (_visitedTabs.contains(2))
-            const LinksScreen()
+            const MediaLibraryScreen(audio: true)
           else
             const SizedBox.shrink(),
           if (_visitedTabs.contains(3))
-            const PlaylistsScreen()
+            const FolderBrowserScreen()
           else
             const SizedBox.shrink(),
           if (_visitedTabs.contains(4))
+            const PlaylistsScreen()
+          else
+            const SizedBox.shrink(),
+          if (_visitedTabs.contains(5))
             MoreScreen(
               onUrlDetected: (url) {
                 setState(() => _currentIndex = 0);
@@ -361,12 +351,17 @@ class _MainNavigationState extends State<MainNavigation> {
             BottomNavigationBarItem(
               icon: Icon(Icons.video_library_outlined),
               activeIcon: Icon(Icons.video_library),
-              label: 'Library',
+              label: 'Video',
             ),
             BottomNavigationBarItem(
-              icon: Icon(Icons.link_outlined),
-              activeIcon: Icon(Icons.link),
-              label: 'Links',
+              icon: Icon(Icons.music_note_outlined),
+              activeIcon: Icon(Icons.music_note),
+              label: 'Audio',
+            ),
+            BottomNavigationBarItem(
+              icon: Icon(Icons.folder_outlined),
+              activeIcon: Icon(Icons.folder),
+              label: 'Browse',
             ),
             BottomNavigationBarItem(
               icon: Icon(Icons.playlist_play_outlined),

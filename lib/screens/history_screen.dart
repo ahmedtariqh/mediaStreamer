@@ -1,3 +1,4 @@
+import '../playback/mini_player.dart';
 import 'package:flutter/material.dart';
 import '../services/browser_state_service.dart';
 
@@ -33,7 +34,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return MediaScaffold(
       appBar: AppBar(
         title: const Text('History'),
         actions: [

@@ -1,3 +1,4 @@
+import '../playback/mini_player.dart';
 import 'dart:async';
 import 'package:flutter/material.dart';
 import '../services/streaming_server.dart';
@@ -83,7 +84,7 @@ class _StreamScreenState extends State<StreamScreen> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
-    return Scaffold(
+    return MediaScaffold(
       appBar: AppBar(title: const Text('Stream')),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(20),
