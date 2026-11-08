@@ -4,16 +4,18 @@
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE"/>
     <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE"/>
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"/>
-    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"/>
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28"/>
     <uses-permission android:name="android.permission.READ_MEDIA_VIDEO"/>
     <uses-permission android:name="android.permission.READ_MEDIA_AUDIO"/>
     <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE"/>
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"/>
     <uses-permission android:name="android.permission.WAKE_LOCK"/>
     <application
         android:usesCleartextTraffic="true"
+        android:extractNativeLibs="true"
         android:label="media_streamer"
         android:name="${applicationName}"
         android:icon="@mipmap/launcher_icon"
@@ -56,10 +58,11 @@
         <activity
             android:name=".ShareActivity"
             android:theme="@style/TransparentTheme"
-            android:launchMode="singleInstance"
+            android:launchMode="singleTop"
             android:excludeFromRecents="true"
             android:exported="true"
-            android:taskAffinity="com.example.media_streamer.ShareActivity">
+            android:taskAffinity=""
+            android:configChanges="orientation|screenSize|keyboardHidden">
             <!-- Share intent: appear in share menu for text (YouTube URLs) -->
             <intent-filter>
                 <action android:name="android.intent.action.SEND"/>
@@ -68,6 +71,10 @@
             </intent-filter>
         </activity>
         
+        <service android:name=".DownloadService" android:exported="false"
+            android:foregroundServiceType="dataSync" android:stopWithTask="false" />
+        <receiver android:name=".DownloadActionReceiver" android:exported="false" />
+
         <!-- just_audio_background: service and receiver -->
         <service android:name="com.ryanheise.audioservice.AudioService" android:foregroundServiceType="mediaPlayback" android:exported="true">
             <intent-filter>

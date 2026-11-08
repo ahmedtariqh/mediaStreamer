@@ -1,122 +1,90 @@
 import 'dart:io';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
-import 'package:youtube_explode_dart/youtube_explode_dart.dart';
+
 import '../models/stream_info_item.dart';
+import 'media_url.dart';
+import 'native_download_service.dart';
 
+class MediaDetails {
+  final String id;
+  final String title;
+  final String thumbnailUrl;
+  const MediaDetails({
+    required this.id,
+    required this.title,
+    required this.thumbnailUrl,
+  });
+}
+
+/// Original name retained for player/library integrations. Android extraction
+/// and downloading use the same yt-dlp engine for every supported platform.
 class YoutubeService {
-  final YoutubeExplode _yt = YoutubeExplode();
-
-  /// Public download directory visible to all apps.
   static const publicDownloadDir = '/storage/emulated/0/Download/MediaStreamer';
+  final _native = NativeDownloadService();
 
-  /// Method channel for MediaStore scanning.
-  static const _mediaStoreChannel = MethodChannel(
-    'com.mediastreamer/media_store',
-  );
-
-  YoutubeExplode getYoutubeExplode() => _yt;
-
-  /// Fetch video metadata from a YouTube URL.
-  Future<Video> getVideoInfo(String url) async {
-    return _yt.videos.get(url);
-  }
-
-  /// Fetch all available streams (muxed, video-only, audio-only) with sizes.
-  Future<(Video, List<StreamInfoItem>)> getAvailableStreams(String url) async {
-    final video = await _yt.videos.get(url);
-    final manifest = await _yt.videos.streamsClient.getManifest(video.id);
-
-    final items = <StreamInfoItem>[];
-
-    // Muxed streams (video + audio)
-    for (final s in manifest.muxed) {
-      items.add(
-        StreamInfoItem(
-          qualityLabel: s.qualityLabel,
-          type: StreamType.muxed,
-          codec: s.videoCodec,
-          container: s.container.name,
-          sizeBytes: s.size.totalBytes,
-          fileSize: StreamInfoItem.formatFileSize(s.size.totalBytes),
-          streamInfo: s,
-        ),
+  Future<(MediaDetails, List<StreamInfoItem>)> getAvailableStreams(
+    String input,
+  ) async {
+    final data = await _native.extract(MediaUrl.require(input));
+    final video = MediaDetails(
+      id: data['id'] as String? ?? '',
+      title: data['title'] as String? ?? 'Video',
+      thumbnailUrl: data['thumbnail'] as String? ?? '',
+    );
+    final items = (data['formats'] as List? ?? []).map((value) {
+      final map = Map<String, dynamic>.from(value as Map);
+      final size = (map['size'] as num?)?.toInt() ?? 0;
+      return StreamInfoItem(
+        qualityLabel: map['label'] as String,
+        type: map['audioOnly'] == true
+            ? StreamType.audioOnly
+            : StreamType.muxed,
+        codec: map['codec'] as String? ?? '',
+        container: map['container'] as String? ?? '',
+        sizeBytes: size,
+        fileSize: StreamInfoItem.formatFileSize(size),
+        formatId: map['id'] as String,
+        title: video.title,
+        thumbnailUrl: video.thumbnailUrl,
+        videoId: video.id,
       );
+    }).toList();
+    if (items.isEmpty) {
+      throw StateError('No downloadable video or audio was found.');
     }
-
-    // Video-only streams
-    for (final s in manifest.videoOnly) {
-      items.add(
-        StreamInfoItem(
-          qualityLabel: s.qualityLabel,
-          type: StreamType.videoOnly,
-          codec: s.videoCodec,
-          container: s.container.name,
-          sizeBytes: s.size.totalBytes,
-          fileSize: StreamInfoItem.formatFileSize(s.size.totalBytes),
-          streamInfo: s,
-        ),
-      );
-    }
-
-    // Audio-only streams
-    for (final s in manifest.audioOnly) {
-      final bitrate = '${(s.bitrate.bitsPerSecond / 1000).round()}kbps';
-      items.add(
-        StreamInfoItem(
-          qualityLabel: bitrate,
-          type: StreamType.audioOnly,
-          codec: s.audioCodec,
-          container: s.container.name,
-          sizeBytes: s.size.totalBytes,
-          fileSize: StreamInfoItem.formatFileSize(s.size.totalBytes),
-          streamInfo: s,
-        ),
-      );
-    }
-
-    // Sort each group by size descending (highest quality first)
-    items.sort((a, b) {
-      if (a.type != b.type) return a.type.index.compareTo(b.type.index);
-      return b.sizeBytes.compareTo(a.sizeBytes);
-    });
-
     return (video, items);
   }
 
-  /// Notify Android MediaStore about a new file.
-  static void scanMediaStore(String filePath) {
+  static Future<void> scanMediaStore(String filePath) async {
     try {
-      _mediaStoreChannel.invokeMethod('scanFile', filePath);
+      await const MethodChannel(
+        'com.mediastreamer/media_store',
+      ).invokeMethod('scanFile', filePath);
     } catch (e) {
       debugPrint('MediaStore scan failed: $e');
     }
   }
 
-  /// List all downloaded video files from the public folder.
   static Future<List<FileSystemEntity>> getDownloadedVideos() async {
-    final videosDir = Directory(publicDownloadDir);
-    if (!await videosDir.exists()) return [];
-    return videosDir
-        .listSync()
+    final directory = Directory(publicDownloadDir);
+    if (!await directory.exists()) return [];
+    return directory
+        .list()
         .where(
-          (f) =>
-              f.path.endsWith('.mp4') ||
-              f.path.endsWith('.webm') ||
-              f.path.endsWith('.m4a'),
+          (file) => RegExp(
+            r'\.(mp4|mkv|webm|m4a|mp3|opus)$',
+            caseSensitive: false,
+          ).hasMatch(file.path),
         )
         .toList();
   }
 
-  /// Delete a downloaded video file.
   static Future<void> deleteVideo(String filePath) async {
     final file = File(filePath);
-    if (await file.exists()) {
-      await file.delete();
-    }
+    if (await file.exists()) await file.delete();
   }
 
-  void dispose() {
-    _yt.close();
-  }
+  void dispose() {}
 }

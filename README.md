@@ -25,12 +25,12 @@
 - **Screen lock** to prevent accidental taps during playback.
 - Fullscreen landscape playback.
 
-### ⬇️ YouTube Downloader
-- Paste or share any YouTube link to start downloading.
-- **Format &amp; quality picker** — choose between muxed, video-only, and audio-only streams with file-size previews.
+### ⬇️ Video & Audio Downloader
+- Paste or share public YouTube, Facebook, Instagram, TikTok, X/Twitter, Vimeo and other yt-dlp-supported video links. Availability depends on the site; login-required/DRM content is not supported.
+- **Format &amp; quality picker** — choose best video, a quality limit, M4A audio, or MP3 audio. FFmpeg merges adaptive streams and converts audio.
 - **Real-time progress bar** with download speed and ETA.
 - Saves to the public `Downloads/MediaStreamer` folder visible to other apps.
-- **Background download notifications** so you can leave the app while downloading.
+- **Native foreground download service** with queued transfers, progress notifications, pause/resume, cancellation, and durable history. Downloads continue after closing the share dialog.
 - **Robust Download Manager**: Pause, resume, cancel, and prevent duplicates mid-flight.
 - Auto-scans Android MediaStore after download.
 
@@ -70,8 +70,8 @@
 - Configurable in the **Settings** tab.
 
 ### 🔗 Share Intent Integration
-- Share a YouTube link **from any app** directly into MediaStreamer.
-- **Seamless Share Overlay**: When sharing from YouTube, MediaStreamer opens a transparent popup rather than forcing you to leave YouTube! Just pick a video quality and it will close automatically while downloading in the background.
+- Share a video link **from any app** directly into MediaStreamer.
+- **Seamless Share Overlay**: When sharing from YouTube, a small native format dialog appears over YouTube. Pick video or audio; it closes back to YouTube while the foreground service downloads. No overlay permission is needed.
 
 ### 🎨 Modern UI
 - Sleek **dark theme** with gradient accents.
@@ -94,15 +94,15 @@
 ## 🚀 Getting Started
 
 ### Prerequisites
-- Flutter SDK `^3.11.0`
-- Android SDK with API 21+
+- Flutter 3.47.9 / Dart 3.13 (package minimum Dart 3.11)
+- Android SDK 36; devices running Android 7.0 / API 24 or newer
 
 ### Build &amp; Run
 
 ```bash
 # Clone the repository
-git clone https://github.com/your-org/media-streamer.git
-cd media-streamer
+git clone https://github.com/ahmedtariqh/mediastreamer.git
+cd mediastreamer
 
 # Install dependencies
 flutter pub get
@@ -123,7 +123,7 @@ The release APK will be located at `build/app/outputs/flutter-apk/app-release.ap
 | Package | Purpose |
 |---------|---------|
 | `video_player` | Local &amp; network video playback |
-| `youtube_explode_dart` | YouTube metadata &amp; stream extraction |
+| `youtubedl-android` / FFmpeg | Native multi-site extraction, video merging and M4A/MP3 conversion |
 | `shelf` / `shelf_static` | HTTP server for LAN streaming |
 | `bonsoir` | mDNS/Bonjour device discovery |
 | `network_info_plus` | Wi-Fi IP detection |
@@ -144,7 +144,7 @@ Here is the prioritized list of enhancements to apply:
 - [ ] View original thumbnails on the file
 - [ ] When screen is locked, continue playing, expose controls on lock screen
 - [ ] Auto rotate by default, regardless of phone settings
-- [ ] True background download
+- [x] Native foreground downloads independent of Flutter/share activity
 - [ ] Continuous touch: playback speed 2x
 - [ ] In download pop-up: remove non-practical formats, make sure they actually work
 - [ ] Download history, options to pause, resume, redownload, copy link
@@ -176,3 +176,7 @@ If you find MediaStreamer useful and would like to support its continued develop
 <p align="center">
   Made with ❤️ by <strong>Tau Automation</strong>
 </p>
+
+## Android verification and dependency notices
+
+See [Android testing](docs/ANDROID_TESTING.md) for build commands, signing limitations and device acceptance checks. See [third-party notices](THIRD_PARTY_NOTICES.md) for download-engine licenses and distribution requirements.

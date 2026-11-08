@@ -1,6 +1,9 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:just_audio_background/just_audio_background.dart';
+
 import '../services/database_service.dart';
 
 class AudioPlayerScreen extends StatefulWidget {
@@ -19,7 +22,8 @@ class AudioPlayerScreen extends StatefulWidget {
 
 class _AudioPlayerScreenState extends State<AudioPlayerScreen> {
   late AudioPlayer _player;
-  bool _isInit = false;
+
+  String? _errorMessage;
 
   @override
   void initState() {
@@ -41,15 +45,27 @@ class _AudioPlayerScreenState extends State<AudioPlayerScreen> {
         ),
       );
 
+      if (!mounted) return;
       final posMap = await DatabaseService.getPlaybackPosition(widget.filePath);
-      if (posMap != null && posMap['positionMs'] != null && (posMap['positionMs'] as int) > 0) {
+      if (!mounted) return;
+      if (posMap != null &&
+          posMap['positionMs'] != null &&
+          (posMap['positionMs'] as int) > 0) {
         await _player.seek(Duration(milliseconds: posMap['positionMs'] as int));
       }
 
-      await _player.play();
-      if (mounted) setState(() => _isInit = true);
+      if (!mounted) return;
+      setState(() => _errorMessage = null);
+      // play() completes when playback ends, not when it starts.
+      unawaited(
+        _player.play().catchError((Object error) {
+          if (mounted) setState(() => _errorMessage = error.toString());
+        }),
+      );
     } catch (e) {
-      debugPrint("Error loading audio: $e");
+      if (mounted) {
+        setState(() => _errorMessage = 'Could not play this audio: $e');
+      }
     }
   }
 
@@ -58,11 +74,15 @@ class _AudioPlayerScreenState extends State<AudioPlayerScreen> {
     final pos = _player.position;
     final dur = _player.duration;
     if (dur != null && dur.inMilliseconds > 0) {
-      DatabaseService.savePlaybackPosition(
-        filePath: widget.filePath,
-        positionMs: pos.inMilliseconds,
-        durationMs: dur.inMilliseconds,
-        title: widget.title,
+      unawaited(
+        DatabaseService.savePlaybackPosition(
+          filePath: widget.filePath,
+          positionMs: pos.inMilliseconds,
+          durationMs: dur.inMilliseconds,
+          title: widget.title,
+        ).catchError((Object error) {
+          debugPrint('Could not save audio position: $error');
+        }),
       );
     }
     _player.dispose();
@@ -80,15 +100,19 @@ class _AudioPlayerScreenState extends State<AudioPlayerScreen> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Now Playing'),
-        centerTitle: true,
-      ),
+      appBar: AppBar(title: const Text('Now Playing'), centerTitle: true),
       body: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 48.0),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
+            if (_errorMessage != null) ...[
+              Text(
+                _errorMessage!,
+                style: const TextStyle(color: Colors.redAccent),
+              ),
+              const SizedBox(height: 16),
+            ],
             // Artwork placeholder
             Container(
               width: 250,
@@ -108,7 +132,9 @@ class _AudioPlayerScreenState extends State<AudioPlayerScreen> {
             Text(
               widget.title,
               textAlign: TextAlign.center,
-              style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
+              style: theme.textTheme.titleLarge?.copyWith(
+                fontWeight: FontWeight.bold,
+              ),
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
             ),
@@ -137,8 +163,14 @@ class _AudioPlayerScreenState extends State<AudioPlayerScreen> {
                       child: Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          Text(_format(pos), style: const TextStyle(color: Colors.white54)),
-                          Text(_format(dur), style: const TextStyle(color: Colors.white54)),
+                          Text(
+                            _format(pos),
+                            style: const TextStyle(color: Colors.white54),
+                          ),
+                          Text(
+                            _format(dur),
+                            style: const TextStyle(color: Colors.white54),
+                          ),
                         ],
                       ),
                     ),
@@ -155,7 +187,8 @@ class _AudioPlayerScreenState extends State<AudioPlayerScreen> {
                   iconSize: 48,
                   icon: const Icon(Icons.replay_10),
                   onPressed: () {
-                    final newPos = _player.position - const Duration(seconds: 10);
+                    final newPos =
+                        _player.position - const Duration(seconds: 10);
                     _player.seek(newPos.isNegative ? Duration.zero : newPos);
                   },
                 ),
@@ -190,7 +223,8 @@ class _AudioPlayerScreenState extends State<AudioPlayerScreen> {
                   iconSize: 48,
                   icon: const Icon(Icons.forward_10),
                   onPressed: () {
-                    final newPos = _player.position + const Duration(seconds: 10);
+                    final newPos =
+                        _player.position + const Duration(seconds: 10);
                     final dur = _player.duration ?? Duration.zero;
                     _player.seek(newPos > dur ? dur : newPos);
                   },

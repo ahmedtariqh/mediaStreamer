@@ -27,10 +27,20 @@ android {
         applicationId = "com.example.media_streamer"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
-        minSdk = flutter.minSdkVersion
+        minSdk = 24
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+    }
+
+    testOptions {
+        unitTests.isIncludeAndroidResources = true
+    }
+
+    packaging {
+        jniLibs.useLegacyPackaging = true
+        // These upstream .so files are ZIP payloads, not ELF binaries.
+        jniLibs.keepDebugSymbols.addAll(setOf("**/libpython.zip.so", "**/libffmpeg.zip.so"))
     }
 
     buildTypes {
@@ -43,6 +53,11 @@ android {
 }
 
 dependencies {
+    implementation("io.github.junkfood02.youtubedl-android:library:0.18.1")
+    implementation("io.github.junkfood02.youtubedl-android:ffmpeg:0.18.1")
+    implementation("androidx.core:core-ktx:1.15.0")
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.robolectric:robolectric:4.14.1")
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
 }
 

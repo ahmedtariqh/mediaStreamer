@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+
 import '../models/download_task.dart';
 import '../models/stream_info_item.dart';
 import '../models/youtube_link.dart';
@@ -61,15 +62,16 @@ class HomeScreenState extends State<HomeScreen>
 
   Future<void> _pasteFromClipboard() async {
     final data = await Clipboard.getData(Clipboard.kTextPlain);
-    if (data?.text != null) {
+    if (mounted && data?.text != null) {
       _urlController.text = data!.text!;
     }
   }
 
   Future<void> _fetchAndPickFormat() async {
+    if (_isFetching) return;
     final url = _urlController.text.trim();
     if (url.isEmpty) {
-      setState(() => _errorMessage = 'Please enter a YouTube URL');
+      setState(() => _errorMessage = 'Please enter a video URL');
       return;
     }
 
@@ -91,13 +93,13 @@ class HomeScreenState extends State<HomeScreen>
         backgroundColor: Colors.transparent,
         builder: (_) => FormatPickerSheet(
           videoTitle: video.title,
-          thumbnailUrl: video.thumbnails.highResUrl,
+          thumbnailUrl: video.thumbnailUrl,
           streams: streams,
         ),
       );
 
       if (selected != null && mounted) {
-        _startDownload(url, selected, video.title);
+        await _startDownload(url, selected, video.title);
       }
     } catch (e) {
       if (mounted) {
@@ -146,6 +148,14 @@ class HomeScreenState extends State<HomeScreen>
           _errorMessage = 'Download Error: ${e.toString()}';
         });
       }
+    }
+  }
+
+  Future<void> _runTaskAction(Future<void> Function() action) async {
+    try {
+      await action();
+    } catch (error) {
+      if (mounted) setState(() => _errorMessage = error.toString());
     }
   }
 
@@ -223,7 +233,7 @@ class HomeScreenState extends State<HomeScreen>
             ),
             const SizedBox(height: 8),
             Text(
-              'Paste a YouTube link to choose format\nand download in your preferred quality',
+              'Paste a YouTube, Facebook or other video link\nand download in your preferred quality',
               textAlign: TextAlign.center,
               style: theme.textTheme.bodyMedium?.copyWith(
                 color: Colors.white54,
@@ -239,7 +249,7 @@ class HomeScreenState extends State<HomeScreen>
                   child: TextField(
                     controller: _urlController,
                     decoration: InputDecoration(
-                      hintText: 'Paste YouTube URL...',
+                      hintText: 'Paste video URL...',
                       prefixIcon: Icon(
                         Icons.link,
                         color: theme.colorScheme.primary,
@@ -317,38 +327,92 @@ class HomeScreenState extends State<HomeScreen>
               builder: (context, _) {
                 final tasks = DownloadManager().activeTasks;
                 final history = DownloadManager().history;
-                if (tasks.isEmpty && history.isEmpty) return const SizedBox.shrink();
+                if (tasks.isEmpty && history.isEmpty) {
+                  return const SizedBox.shrink();
+                }
 
                 return Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     if (tasks.isNotEmpty) ...[
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 12, left: 4),
-                      child: Text(
-                        'Active Downloads (${tasks.length})',
-                        style: theme.textTheme.titleMedium?.copyWith(
-                          fontWeight: FontWeight.bold,
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 12, left: 4),
+                        child: Text(
+                          'Active Downloads (${tasks.length})',
+                          style: theme.textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.bold,
+                          ),
                         ),
                       ),
-                    ),
-                    ...tasks.map(
-                      (task) => Padding(
-                        padding: const EdgeInsets.only(bottom: 12),
-                        child: DownloadProgressTile(
-                          title: task.title,
-                          progress: task.progress,
-                          downloadedBytes: task.downloadedBytes,
-                          totalBytes: task.totalBytes,
-                          speed: task.currentSpeed,
-                          isPaused: task.status == DownloadStatus.paused,
-                          onCancel: () =>
-                              DownloadManager().cancelDownload(task.id),
-                          onPause: () => DownloadManager().pauseDownload(task.id),
-                          onResume: () => DownloadManager().resumeDownload(task.id),
+                      ...tasks.map(
+                        (task) => Padding(
+                          padding: const EdgeInsets.only(bottom: 12),
+                          child: task.status == DownloadStatus.failed
+                              ? Card(
+                                  child: ListTile(
+                                    leading: const Icon(
+                                      Icons.error_outline,
+                                      color: Colors.redAccent,
+                                    ),
+                                    title: Text(
+                                      task.title,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                    subtitle: Text(
+                                      task.errorMessage ?? 'Download failed',
+                                    ),
+                                    trailing: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        IconButton(
+                                          icon: const Icon(Icons.refresh),
+                                          tooltip: 'Retry',
+                                          onPressed: () => _runTaskAction(
+                                            () => DownloadManager()
+                                                .resumeDownload(task.id),
+                                          ),
+                                        ),
+                                        IconButton(
+                                          icon: const Icon(Icons.close),
+                                          tooltip: 'Dismiss',
+                                          onPressed: () => _runTaskAction(
+                                            () => DownloadManager()
+                                                .cancelDownload(task.id),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                )
+                              : DownloadProgressTile(
+                                  title: task.status == DownloadStatus.queued
+                                      ? 'Queued: ${task.title}'
+                                      : task.title,
+                                  progress: task.progress,
+                                  downloadedBytes: task.downloadedBytes,
+                                  totalBytes: task.totalBytes,
+                                  speed: task.currentSpeed,
+                                  isPaused:
+                                      task.status == DownloadStatus.paused,
+                                  onCancel: () => _runTaskAction(
+                                    () => DownloadManager().cancelDownload(
+                                      task.id,
+                                    ),
+                                  ),
+                                  onPause: () => _runTaskAction(
+                                    () => DownloadManager().pauseDownload(
+                                      task.id,
+                                    ),
+                                  ),
+                                  onResume: () => _runTaskAction(
+                                    () => DownloadManager().resumeDownload(
+                                      task.id,
+                                    ),
+                                  ),
+                                ),
                         ),
                       ),
-                    ),
                     ],
 
                     if (history.isNotEmpty) ...[
@@ -373,7 +437,9 @@ class HomeScreenState extends State<HomeScreen>
                                     width: 60,
                                     height: 45,
                                     fit: BoxFit.cover,
-                                    errorBuilder: (_, __, ___) => const Icon(Icons.video_file),
+                                    errorBuilder:
+                                        (context, error, stackTrace) =>
+                                            const Icon(Icons.video_file),
                                   ),
                                 )
                               : const Icon(Icons.video_file),
@@ -386,7 +452,9 @@ class HomeScreenState extends State<HomeScreen>
                           subtitle: Text(
                             item.fileExists ? 'Downloaded' : 'File missing',
                             style: TextStyle(
-                              color: item.fileExists ? Colors.green : Colors.redAccent,
+                              color: item.fileExists
+                                  ? Colors.green
+                                  : Colors.redAccent,
                               fontSize: 12,
                             ),
                           ),
@@ -397,9 +465,13 @@ class HomeScreenState extends State<HomeScreen>
                                 icon: const Icon(Icons.copy, size: 20),
                                 tooltip: 'Copy Link',
                                 onPressed: () {
-                                  Clipboard.setData(ClipboardData(text: item.youtubeUrl));
+                                  Clipboard.setData(
+                                    ClipboardData(text: item.youtubeUrl),
+                                  );
                                   ScaffoldMessenger.of(context).showSnackBar(
-                                    const SnackBar(content: Text('Link copied to clipboard')),
+                                    const SnackBar(
+                                      content: Text('Link copied to clipboard'),
+                                    ),
                                   );
                                 },
                               ),
@@ -412,9 +484,16 @@ class HomeScreenState extends State<HomeScreen>
                                 },
                               ),
                               IconButton(
-                                icon: const Icon(Icons.delete_outline, size: 20),
+                                icon: const Icon(
+                                  Icons.delete_outline,
+                                  size: 20,
+                                ),
                                 tooltip: 'Remove from history',
-                                onPressed: () => DownloadManager().removeHistoryItem(item.id),
+                                onPressed: () => _runTaskAction(
+                                  () => DownloadManager().removeHistoryItem(
+                                    item.id,
+                                  ),
+                                ),
                               ),
                             ],
                           ),
@@ -458,7 +537,7 @@ class HomeScreenState extends State<HomeScreen>
                   const SizedBox(height: 12),
                   _tipItem(
                     Icons.share,
-                    'Share a YouTube link from the YouTube app to download here',
+                    'In YouTube, tap Share → MediaStreamer, pick video or audio, and keep watching',
                   ),
                   const SizedBox(height: 8),
                   _tipItem(

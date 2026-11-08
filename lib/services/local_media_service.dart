@@ -1,7 +1,9 @@
 import 'dart:io';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:permission_handler/permission_handler.dart';
+
 import '../models/folder_item.dart';
 
 class MediaFile {
@@ -199,10 +201,10 @@ class LocalMediaService {
 
     for (final dirPath in commonPaths) {
       final dir = Directory(dirPath);
-      if (!dir.existsSync()) continue;
+      if (!await dir.exists()) continue;
 
       try {
-        for (final entity in dir.listSync(
+        await for (final entity in dir.list(
           recursive: true,
           followLinks: false,
         )) {
@@ -219,7 +221,7 @@ class LocalMediaService {
 
           if (type != null) {
             try {
-              final stat = entity.statSync();
+              final stat = await entity.stat();
               final parts = entity.path.split('/');
               files.add(
                 MediaFile(

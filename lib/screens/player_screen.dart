@@ -1,11 +1,14 @@
 import 'dart:async';
 import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:video_player/video_player.dart';
+
 import '../models/video_note.dart';
 import '../services/database_service.dart';
+import '../services/download_manager.dart';
 import '../services/youtube_service.dart';
 import '../widgets/post_watch_dialog.dart';
 
@@ -27,6 +30,7 @@ class PlayerScreen extends StatefulWidget {
 
 class _PlayerScreenState extends State<PlayerScreen> {
   VideoPlayerController? _controller;
+  int _playerGeneration = 0;
 
   bool _hasShownDialog = false;
   bool _isPlaying = false;
@@ -80,87 +84,57 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _resetHideTimer();
   }
 
-  void _initPlayer() {
+  Future<void> _initPlayer() async {
+    final generation = ++_playerGeneration;
     setState(() {
       _hasError = false;
       _errorMessage = '';
       _isInitialized = false;
     });
-
-    final effectivePath = widget.filePath;
-
+    bool current() => mounted && generation == _playerGeneration;
     try {
-      if (effectivePath.startsWith('http')) {
-        _controller = VideoPlayerController.networkUrl(
-          Uri.parse(effectivePath),
-          videoPlayerOptions: VideoPlayerOptions(mixWithOthers: true),
-        );
-      } else {
-        // Check if the file exists
-        final file = File(effectivePath);
-        if (!file.existsSync()) {
-          setState(() {
-            _hasError = true;
-            _errorMessage = 'File not found:\n$effectivePath';
-          });
-          return;
-        }
-        _controller = VideoPlayerController.file(
-          file,
-          videoPlayerOptions: VideoPlayerOptions(mixWithOthers: true),
-        );
+      final path = widget.filePath;
+      final remote = Uri.tryParse(path);
+      final isRemote = remote?.scheme == 'http' || remote?.scheme == 'https';
+      if (!isRemote && !await File(path).exists()) {
+        throw StateError('File not found: $path');
       }
-
-      _controller!
-          .initialize()
-          .then((_) async {
-            if (!mounted) return;
-            setState(() {
-              _isInitialized = true;
-              _duration = _controller!.value.duration;
-            });
-
-            // Check if we should resume from saved position
-            final prefs = await SharedPreferences.getInstance();
-            final resumeEnabled = prefs.getBool('resumePlayback') ?? true;
-            if (resumeEnabled) {
-              final saved = await DatabaseService.getPlaybackPosition(
-                widget.filePath,
-              );
-              if (saved != null) {
-                final savedPos = Duration(
-                  milliseconds: saved['positionMs'] as int,
-                );
-                final savedDur = Duration(
-                  milliseconds: saved['durationMs'] as int,
-                );
-                // Only resume if not near the end (within 95%)
-                if (savedPos.inMilliseconds < savedDur.inMilliseconds * 0.95) {
-                  await _controller!.seekTo(savedPos);
-                  if (mounted) {
-                    setState(() => _position = savedPos);
-                  }
-                }
-              }
-            }
-
-            _controller!.play();
-            _controller!.addListener(_onPlayerEvent);
-            _startPositionPolling();
-          })
-          .catchError((error) {
-            if (mounted) {
-              setState(() {
-                _hasError = true;
-                _errorMessage =
-                    'Could not play this file.\n${error.toString()}';
-              });
-            }
-          });
-    } catch (e) {
+      if (!current()) return;
+      final controller = isRemote
+          ? VideoPlayerController.networkUrl(remote!)
+          : VideoPlayerController.file(File(path));
+      _controller = controller;
+      await controller.initialize();
+      if (!current()) return;
+      setState(() {
+        _isInitialized = true;
+        _duration = controller.value.duration;
+      });
+      final prefs = await SharedPreferences.getInstance();
+      if (!current()) return;
+      if (prefs.getBool('resumePlayback') ?? true) {
+        final saved = await DatabaseService.getPlaybackPosition(
+          widget.filePath,
+        );
+        if (!current()) return;
+        if (saved != null) {
+          final position = saved['positionMs'] as int;
+          final duration = saved['durationMs'] as int;
+          if (position > 0 && position < duration * 0.95) {
+            await controller.seekTo(Duration(milliseconds: position));
+            if (!current()) return;
+            setState(() => _position = Duration(milliseconds: position));
+          }
+        }
+      }
+      controller.addListener(_onPlayerEvent);
+      await controller.play();
+      if (current()) _startPositionPolling();
+    } catch (error) {
+      if (!current()) return;
       setState(() {
         _hasError = true;
-        _errorMessage = 'Player error: ${e.toString()}';
+        _errorMessage = 'Could not play this file.\n$error';
       });
     }
   }
@@ -197,12 +171,16 @@ class _PlayerScreenState extends State<PlayerScreen> {
     final pos = _controller!.value.position;
     final dur = _controller!.value.duration;
     if (dur.inMilliseconds <= 0) return;
-    await DatabaseService.savePlaybackPosition(
-      filePath: widget.filePath,
-      positionMs: pos.inMilliseconds,
-      durationMs: dur.inMilliseconds,
-      title: widget.title,
-    );
+    try {
+      await DatabaseService.savePlaybackPosition(
+        filePath: widget.filePath,
+        positionMs: pos.inMilliseconds,
+        durationMs: dur.inMilliseconds,
+        title: widget.title,
+      );
+    } catch (error) {
+      debugPrint('Could not save playback position: $error');
+    }
   }
 
   void _onPlayerEvent() {
@@ -228,6 +206,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   @override
   void dispose() {
+    _playerGeneration++;
     // Save position one last time before disposing
     _saveCurrentPosition();
     _hideTimer?.cancel();
@@ -391,16 +370,18 @@ class _PlayerScreenState extends State<PlayerScreen> {
   void _handleDoubleTap(TapDownDetails details, double screenWidth) {
     if (_isLocked || _controller == null) return;
     final x = details.globalPosition.dx;
-    
+
     // Define the middle 30% of the screen for play/pause
     final middleZone = screenWidth * 0.3;
     final leftBound = (screenWidth - middleZone) / 2;
     final rightBound = leftBound + middleZone;
-    
+
     if (x > leftBound && x < rightBound) {
       _togglePlay();
       setState(() {
-        _gestureIcon = _controller!.value.isPlaying ? Icons.play_arrow : Icons.pause;
+        _gestureIcon = _controller!.value.isPlaying
+            ? Icons.play_arrow
+            : Icons.pause;
         _gestureText = _controller!.value.isPlaying ? 'Playing' : 'Paused';
       });
       _doubleTapTimer?.cancel();
@@ -523,6 +504,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
   /// Extract YouTube URL from downloaded filename pattern: {videoId}_{title}.ext
   String _resolveYoutubeUrl() {
     if (widget.youtubeUrl.isNotEmpty) return widget.youtubeUrl;
+    final saved = DownloadManager().history
+        .where((item) => item.filePath == widget.filePath)
+        .firstOrNull;
+    if (saved != null) return saved.youtubeUrl;
     // Try extracting from filename
     final fileName = widget.filePath.split(Platform.pathSeparator).last;
     final underscoreIndex = fileName.indexOf('_');
@@ -538,6 +523,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   /// Clean title by stripping videoId prefix and file extension.
   String _resolveTitle() {
+    final saved = DownloadManager().history
+        .where((item) => item.filePath == widget.filePath)
+        .firstOrNull;
+    if (saved != null) return saved.title;
     final fileName = widget.filePath.split(Platform.pathSeparator).last;
     // Strip extension
     var clean = fileName.replaceAll(

@@ -546,7 +546,7 @@ class _VideoThumbnailWidgetState extends State<VideoThumbnailWidget> {
           fit: BoxFit.cover,
           width: double.infinity,
           height: double.infinity,
-          errorBuilder: (_, __, ___) => Icon(Icons.videocam, color: Theme.of(context).colorScheme.primary),
+          errorBuilder: (context, error, stackTrace) => Icon(Icons.videocam, color: Theme.of(context).colorScheme.primary),
         ),
       );
     }

@@ -6,11 +6,13 @@ import android.media.MediaScannerConnection
 import android.net.Uri
 import android.os.Bundle
 import android.provider.MediaStore
-import io.flutter.embedding.android.FlutterActivity
+import com.ryanheise.audioservice.AudioServiceActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 
-class MainActivity : FlutterActivity() {
+class MainActivity : AudioServiceActivity() {
+    private var downloadChannel: DownloadChannel? = null
+    private val mediaWorker = java.util.concurrent.Executors.newSingleThreadExecutor()
     private val VIEW_CHANNEL = "com.mediastreamer/view_intent"
     private val MEDIA_STORE_CHANNEL = "com.mediastreamer/media_store"
     private val MEDIA_QUERY_CHANNEL = "com.mediastreamer/media_query"
@@ -23,6 +25,7 @@ class MainActivity : FlutterActivity() {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        downloadChannel = DownloadChannel(this, flutterEngine)
 
         // View intent channel — open files from external apps
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, VIEW_CHANNEL)
@@ -62,16 +65,28 @@ class MainActivity : FlutterActivity() {
                     "queryMedia" -> {
                         val includeVideo = call.argument<Boolean>("includeVideo") ?: true
                         val includeAudio = call.argument<Boolean>("includeAudio") ?: true
-                        try {
-                            val mediaFiles = queryAllMedia(includeVideo, includeAudio)
-                            result.success(mediaFiles)
-                        } catch (e: Exception) {
-                            result.error("QUERY_ERROR", e.message, null)
+                        mediaWorker.execute {
+                            try {
+                                val mediaFiles = queryAllMedia(includeVideo, includeAudio)
+                                runOnUiThread { result.success(mediaFiles) }
+                            } catch (e: Exception) {
+                                runOnUiThread { result.error("QUERY_ERROR", e.message, null) }
+                            }
                         }
                     }
                     else -> result.notImplemented()
                 }
             }
+    }
+
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        downloadChannel?.onPermissionResult(requestCode, grantResults)
+    }
+
+    override fun onDestroy() {
+        mediaWorker.shutdown()
+        super.onDestroy()
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -156,7 +171,7 @@ class MainActivity : FlutterActivity() {
                         results.add(mapOf(
                             "path" to path,
                             "name" to name,
-                            "size" to size.toInt(),
+                            "size" to size,
                             "modified" to modified,
                             "isVideo" to isVideo,
                         ))

@@ -98,8 +98,6 @@ class _PlaylistDetailScreenState extends State<PlaylistDetailScreen> {
   }
 
   Future<void> _onReorder(int oldIndex, int newIndex) async {
-    if (newIndex > oldIndex) newIndex--;
-
     setState(() {
       final item = _items.removeAt(oldIndex);
       _items.insert(newIndex, item);
@@ -131,7 +129,7 @@ class _PlaylistDetailScreenState extends State<PlaylistDetailScreen> {
           : ReorderableListView.builder(
               padding: const EdgeInsets.symmetric(vertical: 8),
               itemCount: _items.length,
-              onReorder: _onReorder,
+              onReorderItem: _onReorder,
               itemBuilder: (context, index) {
                 final item = _items[index];
                 return _buildItemTile(theme, item, key: ValueKey(item.id));
