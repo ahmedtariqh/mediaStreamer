@@ -1,5 +1,9 @@
+import '../playback/mini_player.dart';
+import '../services/media_url.dart';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
+
 import '../models/detected_video.dart';
 import '../services/download_manager.dart';
 import '../services/browser_state_service.dart';
@@ -46,6 +50,7 @@ class _BrowserScreenState extends State<BrowserScreen> {
   Future<void> _loadSettings() async {
     final adBlock = await BrowserStateService.getAdBlockEnabled();
     final desktop = await BrowserStateService.getDesktopModeEnabled();
+    if (!mounted) return;
     setState(() {
       isAdBlockEnabled = adBlock;
       isDesktopMode = desktop;
@@ -80,22 +85,28 @@ class _BrowserScreenState extends State<BrowserScreen> {
     }
   }
 
+  bool _returnedMedia = false;
+
   void _checkMediaResource(String url) {
-    if (url.isEmpty || url.startsWith('data:') || url.startsWith('blob:')) {
+    if (!mounted ||
+        _returnedMedia ||
+        url.isEmpty ||
+        url.startsWith('data:') ||
+        url.startsWith('blob:')) {
       return;
     }
 
     final lowerUrl = url.toLowerCase();
 
     // Check if it's a Youtube request - let the popup handle it directly
-    if (lowerUrl.contains('youtube.com/watch') ||
-        lowerUrl.contains('youtu.be/')) {
+    if (MediaUrl.isSocialVideo(url)) {
       // Only intercept if we haven't already returned the URL
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('YouTube video detected, returning to home...'),
+          content: Text('Video detected, opening download options...'),
         ),
       );
+      _returnedMedia = true;
       Navigator.pop(context, url);
       return;
     }
@@ -113,8 +124,9 @@ class _BrowserScreenState extends State<BrowserScreen> {
     }
 
     if (mediaType != null) {
-      final nameStr = Uri.parse(url).pathSegments.last.isNotEmpty
-          ? Uri.parse(url).pathSegments.last
+      final lastSegment = Uri.tryParse(url)?.pathSegments.lastOrNull;
+      final nameStr = lastSegment?.isNotEmpty == true
+          ? lastSegment!
           : 'Video Stream';
 
       final v = DetectedVideo(url: url, mediaType: mediaType, name: nameStr);
@@ -203,22 +215,19 @@ class _BrowserScreenState extends State<BrowserScreen> {
     );
   }
 
-  void _startDownload(String url, String name) {
-    if (url.toLowerCase().contains('.m3u8')) {
+  Future<void> _startDownload(String url, String name) async {
+    try {
+      await DownloadManager().startGenericDownload(url, name);
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Download queued: $name')));
+    } catch (error) {
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'HLS downloads via browser not fully supported yet. Please use YouTube links if available.',
-          ),
-        ),
+        SnackBar(content: Text('Could not start download: $error')),
       );
-      return;
     }
-
-    DownloadManager().startGenericDownload(url, name);
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text('Started download: $name')));
   }
 
   Future<void> _handleMenuSelection(String choice) async {
@@ -307,7 +316,7 @@ class _BrowserScreenState extends State<BrowserScreen> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
-    return Scaffold(
+    return MediaScaffold(
       appBar: AppBar(
         titleSpacing: 0,
         leading: IconButton(
@@ -480,7 +489,7 @@ class _BrowserScreenState extends State<BrowserScreen> {
                     return NavigationActionPolicy.ALLOW;
                   },
                   onLoadStart: (controller, url) {
-                    if (url != null) {
+                    if (mounted && url != null) {
                       setState(() {
                         _urlController.text = url.toString();
                         // Reset caught videos on new page navigate
@@ -505,6 +514,7 @@ class _BrowserScreenState extends State<BrowserScreen> {
                   onProgressChanged: (controller, p) async {
                     final back = await controller.canGoBack();
                     final forward = await controller.canGoForward();
+                    if (!mounted) return;
                     setState(() {
                       progress = p / 100;
                       canGoBack = back;

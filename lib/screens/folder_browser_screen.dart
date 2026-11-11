@@ -1,3 +1,4 @@
+import '../playback/mini_player.dart';
 import 'dart:typed_data';
 import 'package:get_thumbnail_video/index.dart';
 import 'package:get_thumbnail_video/video_thumbnail.dart';
@@ -114,7 +115,7 @@ class _FolderBrowserScreenState extends State<FolderBrowserScreen> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
-    return Scaffold(
+    return MediaScaffold(
       appBar: AppBar(
         title: _isSearching
             ? TextField(
@@ -389,10 +390,7 @@ class _FolderBrowserScreenState extends State<FolderBrowserScreen> {
           ),
           child: isVideo
               ? VideoThumbnailWidget(path: file.path)
-              : Icon(
-                  Icons.audiotrack,
-                  color: theme.colorScheme.secondary,
-                ),
+              : Icon(Icons.audiotrack, color: theme.colorScheme.secondary),
         ),
         title: Text(
           file.name,
@@ -442,15 +440,19 @@ class _FolderBrowserScreenState extends State<FolderBrowserScreen> {
       Navigator.push(
         context,
         MaterialPageRoute(
-          builder: (_) => AudioPlayerScreen(filePath: file.path, title: file.name),
+          builder: (_) =>
+              AudioPlayerScreen(filePath: file.path, title: file.name),
         ),
       );
     } else {
       Navigator.push(
         context,
         MaterialPageRoute(
-          builder: (_) =>
-              PlayerScreen(filePath: file.path, title: file.name, youtubeUrl: ''),
+          builder: (_) => PlayerScreen(
+            filePath: file.path,
+            title: file.name,
+            youtubeUrl: '',
+          ),
         ),
       );
     }
@@ -546,7 +548,10 @@ class _VideoThumbnailWidgetState extends State<VideoThumbnailWidget> {
           fit: BoxFit.cover,
           width: double.infinity,
           height: double.infinity,
-          errorBuilder: (_, __, ___) => Icon(Icons.videocam, color: Theme.of(context).colorScheme.primary),
+          errorBuilder: (context, error, stackTrace) => Icon(
+            Icons.videocam,
+            color: Theme.of(context).colorScheme.primary,
+          ),
         ),
       );
     }

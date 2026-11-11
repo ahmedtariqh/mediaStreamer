@@ -1,14 +1,17 @@
 import 'dart:async';
-import 'package:just_audio_background/just_audio_background.dart';
-import 'package:audio_session/audio_session.dart';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:receive_sharing_intent/receive_sharing_intent.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
 import 'app_theme.dart';
 import 'screens/home_screen.dart';
-import 'screens/library_screen.dart';
-import 'screens/links_screen.dart';
+import 'playback/media_library_screen.dart';
+import 'screens/folder_browser_screen.dart';
+import 'playback/mini_player.dart';
+import 'playback/playback_controller.dart';
+import 'playback/media_preferences.dart';
 import 'screens/playlists_screen.dart';
 import 'screens/more_screen.dart';
 import 'screens/player_screen.dart';
@@ -16,50 +19,14 @@ import 'services/database_service.dart';
 import 'services/local_media_service.dart';
 import 'services/webhook_service.dart';
 import 'services/download_manager.dart';
-import 'screens/share_popup_screen.dart';
-
-@pragma('vm:entry-point')
-void mainShare() async {
-  WidgetsFlutterBinding.ensureInitialized();
-  await DownloadManager().init();
-  runApp(const ShareApp());
-}
-
-class ShareApp extends StatelessWidget {
-  const ShareApp({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
-      debugShowCheckedModeBanner: false,
-      theme: AppTheme.darkTheme.copyWith(
-        scaffoldBackgroundColor: Colors.transparent,
-      ),
-      home: const SharePopupScreen(),
-    );
-  }
-}
+import 'screens/audio_player_screen.dart';
+import 'services/media_url.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  
-  try {
-    await JustAudioBackground.init(
-      androidNotificationChannelId: 'com.ryanheise.bg_demo.channel.audio',
-      androidNotificationChannelName: 'Audio playback',
-      androidNotificationOngoing: true,
-      androidNotificationIcon: 'mipmap/launcher_icon',
-    );
-  } catch (e) {
-    debugPrint('JustAudioBackground init error: $e');
-  }
 
-  try {
-    final session = await AudioSession.instance;
-    await session.configure(const AudioSessionConfiguration.music());
-  } catch (e) {
-    debugPrint('AudioSession init error: $e');
-  }
+  await MediaPreferences.instance.load();
+  await PlaybackController.instance.init();
 
   try {
     await DownloadManager().init();
@@ -93,6 +60,7 @@ class MainNavigation extends StatefulWidget {
 
 class _MainNavigationState extends State<MainNavigation> {
   int _currentIndex = 0;
+  final _visitedTabs = <int>{0};
   final GlobalKey<HomeScreenState> _homeKey = GlobalKey<HomeScreenState>();
 
   late StreamSubscription _intentSub;
@@ -117,9 +85,14 @@ class _MainNavigationState extends State<MainNavigation> {
     );
 
     // Handle share intent when app is launched via share
-    ReceiveSharingIntent.instance.getInitialMedia().then((files) {
-      _handleSharedFiles(files);
-    });
+    ReceiveSharingIntent.instance
+        .getInitialMedia()
+        .then((files) {
+          if (mounted) _handleSharedFiles(files);
+        })
+        .catchError((Object error) {
+          debugPrint('Initial share failed: $error');
+        });
 
     // Handle file VIEW intent from native side
     _viewIntentChannel.setMethodCallHandler((call) async {
@@ -135,7 +108,9 @@ class _MainNavigationState extends State<MainNavigation> {
     _checkInitialViewIntent();
 
     // Check if we should show resume dialog
-    _checkResumeOnStartup();
+    _checkResumeOnStartup().catchError((Object error) {
+      debugPrint('Resume check failed: $error');
+    });
 
     // Start webhook service if enabled
     WebhookService.start();
@@ -271,7 +246,12 @@ class _MainNavigationState extends State<MainNavigation> {
       context,
       MaterialPageRoute(
         builder: (_) =>
-            PlayerScreen(filePath: filePath, title: fileName, youtubeUrl: ''),
+            LocalMediaService.typeForExtension(
+                  '.${fileName.split('.').last}',
+                ) ==
+                MediaFileType.audio
+            ? AudioPlayerScreen(filePath: filePath, title: fileName)
+            : PlayerScreen(filePath: filePath, title: fileName, youtubeUrl: ''),
       ),
     );
   }
@@ -280,21 +260,12 @@ class _MainNavigationState extends State<MainNavigation> {
     for (final file in files) {
       final text = file.path;
 
-      // Check if the shared text contains a YouTube URL
-      if (text.contains('youtube.com') ||
-          text.contains('youtu.be') ||
-          text.contains('youtube')) {
-        // Extract URL from shared text (may contain extra text)
-        final urlMatch = RegExp(
-          r'(https?://(?:www\.)?(?:youtube\.com|youtu\.be)[^\s]+)',
-        ).firstMatch(text);
-        final url = urlMatch?.group(0) ?? text;
-
-        // Navigate to home and auto-trigger format fetch
+      final url = MediaUrl.extract(text);
+      if (url != null) {
+        if (!mounted) return;
         setState(() => _currentIndex = 0);
-        // Delay to ensure widget is built
-        Future.delayed(const Duration(milliseconds: 300), () {
-          _homeKey.currentState?.fetchAndPickFormatFromUrl(url);
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _homeKey.currentState?.fetchAndPickFormatFromUrl(url);
         });
         break;
       }
@@ -315,27 +286,44 @@ class _MainNavigationState extends State<MainNavigation> {
   void dispose() {
     _intentSub.cancel();
     WebhookService.stop();
+    _viewIntentChannel.setMethodCallHandler(null);
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return MediaScaffold(
       body: IndexedStack(
         index: _currentIndex,
         children: [
           HomeScreen(key: _homeKey),
-          const LibraryScreen(),
-          const LinksScreen(),
-          const PlaylistsScreen(),
-          MoreScreen(
-            onUrlDetected: (url) {
-              setState(() => _currentIndex = 0);
-              Future.delayed(const Duration(milliseconds: 300), () {
-                _homeKey.currentState?.fetchAndPickFormatFromUrl(url);
-              });
-            },
-          ),
+          if (_visitedTabs.contains(1))
+            const MediaLibraryScreen(audio: false)
+          else
+            const SizedBox.shrink(),
+          if (_visitedTabs.contains(2))
+            const MediaLibraryScreen(audio: true)
+          else
+            const SizedBox.shrink(),
+          if (_visitedTabs.contains(3))
+            const FolderBrowserScreen()
+          else
+            const SizedBox.shrink(),
+          if (_visitedTabs.contains(4))
+            const PlaylistsScreen()
+          else
+            const SizedBox.shrink(),
+          if (_visitedTabs.contains(5))
+            MoreScreen(
+              onUrlDetected: (url) {
+                setState(() => _currentIndex = 0);
+                Future.delayed(const Duration(milliseconds: 300), () {
+                  _homeKey.currentState?.fetchAndPickFormatFromUrl(url);
+                });
+              },
+            )
+          else
+            const SizedBox.shrink(),
         ],
       ),
       bottomNavigationBar: Container(
@@ -350,7 +338,10 @@ class _MainNavigationState extends State<MainNavigation> {
         ),
         child: BottomNavigationBar(
           currentIndex: _currentIndex,
-          onTap: (index) => setState(() => _currentIndex = index),
+          onTap: (index) => setState(() {
+            _currentIndex = index;
+            _visitedTabs.add(index);
+          }),
           items: const [
             BottomNavigationBarItem(
               icon: Icon(Icons.home_outlined),
@@ -360,12 +351,17 @@ class _MainNavigationState extends State<MainNavigation> {
             BottomNavigationBarItem(
               icon: Icon(Icons.video_library_outlined),
               activeIcon: Icon(Icons.video_library),
-              label: 'Library',
+              label: 'Video',
             ),
             BottomNavigationBarItem(
-              icon: Icon(Icons.link_outlined),
-              activeIcon: Icon(Icons.link),
-              label: 'Links',
+              icon: Icon(Icons.music_note_outlined),
+              activeIcon: Icon(Icons.music_note),
+              label: 'Audio',
+            ),
+            BottomNavigationBarItem(
+              icon: Icon(Icons.folder_outlined),
+              activeIcon: Icon(Icons.folder),
+              label: 'Browse',
             ),
             BottomNavigationBarItem(
               icon: Icon(Icons.playlist_play_outlined),

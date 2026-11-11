@@ -1,9 +1,19 @@
 allprojects {
     repositories {
-        maven { url = uri("https://maven.aliyun.com/repository/google") }
-        maven { url = uri("https://maven.aliyun.com/repository/public") }
         google()
         mavenCentral()
+    }
+}
+
+// Use the root toolchain for Flutter plugins as well. Otherwise each plugin
+// resolves/instruments a separate AGP/Kotlin version, wasting memory and making
+// builds dependent on conflicting plugin classpaths.
+subprojects {
+    buildscript.configurations.configureEach {
+        resolutionStrategy.force(
+            "com.android.tools.build:gradle:8.11.1",
+            "org.jetbrains.kotlin:kotlin-gradle-plugin:2.2.20",
+        )
     }
 }
 

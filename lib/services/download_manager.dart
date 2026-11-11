@@ -2,466 +2,211 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:flutter/foundation.dart';
-import 'package:flutter_background/flutter_background.dart';
+import 'package:flutter/widgets.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/download_history.dart';
 import '../models/download_task.dart';
 import '../models/stream_info_item.dart';
-import 'download_notification_service.dart';
+import 'media_url.dart';
+import 'native_download_service.dart';
 import 'youtube_service.dart';
 
-class DownloadManager extends ChangeNotifier {
+/// A view of the native service. Closing Flutter never cancels a download.
+class DownloadManager extends ChangeNotifier with WidgetsBindingObserver {
   static final DownloadManager _instance = DownloadManager._internal();
   factory DownloadManager() => _instance;
   DownloadManager._internal();
 
-  final YoutubeService _youtubeService = YoutubeService();
-  final Map<String, DownloadTask> _activeDownloads = {};
-  final Map<String, StreamSubscription<List<int>>> _subscriptions = {};
-  final Map<String, IOSink> _sinks = {};
+  final _native = NativeDownloadService();
+  final _tasks = <DownloadTask>[];
+  final _nativeHistory = <DownloadHistoryItem>[];
+  final _legacyHistory = <DownloadHistoryItem>[];
+  Timer? _poller;
+  Future<void>? _initialization;
+  bool _refreshing = false;
+  String? _lastSnapshot;
+  List<DownloadTask> get activeTasks => List.unmodifiable(_tasks);
+  List<DownloadHistoryItem> get history => List.unmodifiable([
+    ..._nativeHistory,
+    ..._legacyHistory.where(
+      (old) => !_nativeHistory.any((item) => item.filePath == old.filePath),
+    ),
+  ]);
 
-  List<DownloadHistoryItem> _history = [];
+  Future<void> init() => _initialization ??= _init();
 
-  List<DownloadHistoryItem> get history => _history;
-  List<DownloadTask> get activeTasks => _activeDownloads.values.toList();
-
-  Future<void> init() async {
-    await _loadHistory();
-  }
-
-  Future<void> _loadHistory() async {
+  Future<void> _init() async {
     final prefs = await SharedPreferences.getInstance();
-    final historyList = prefs.getStringList('download_history') ?? [];
-    _history = historyList
-        .map((e) => DownloadHistoryItem.fromJson(jsonDecode(e)))
-        .toList();
-
-    // Check if files still exist
-    for (var item in _history) {
-      item.fileExists = await File(item.filePath).exists();
+    for (final value in prefs.getStringList('download_history') ?? <String>[]) {
+      try {
+        final item = DownloadHistoryItem.fromJson(jsonDecode(value));
+        item.fileExists = await File(item.filePath).exists();
+        _legacyHistory.add(item);
+      } catch (e) {
+        debugPrint('Skipping damaged history entry: $e');
+      }
     }
-    notifyListeners();
+    WidgetsBinding.instance.addObserver(this);
+    await refresh();
   }
 
-  Future<void> _saveHistory() async {
-    final prefs = await SharedPreferences.getInstance();
-    final historyList = _history.map((e) => jsonEncode(e.toJson())).toList();
-    await prefs.setStringList('download_history', historyList);
+  void _startPolling() {
+    _poller?.cancel();
+    _poller = Timer.periodic(const Duration(seconds: 1), (_) => refresh());
   }
 
-  void _addToHistory(DownloadTask task) {
-    // If it already exists in history, we might want to update or move it to front.
-    _history.removeWhere((item) => item.youtubeUrl == task.youtubeUrl);
-    final historyItem = DownloadHistoryItem(
-      id: task.id,
-      videoId: task.videoId,
-      title: task.title,
-      youtubeUrl: task.youtubeUrl,
-      thumbnailUrl: task.thumbnailUrl,
-      filePath: task.filePath,
-      downloadDate: DateTime.now(),
-      fileExists: true,
-    );
-    _history.insert(0, historyItem);
-    _saveHistory();
-    notifyListeners();
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      refresh();
+      _startPolling();
+    } else {
+      _poller?.cancel();
+    }
   }
 
-  void removeHistoryItem(String id) {
-    _history.removeWhere((item) => item.id == id);
-    _saveHistory();
-    notifyListeners();
+  Future<void> refresh() async {
+    if (_refreshing) return;
+    _refreshing = true;
+    try {
+      final snapshot = await _native.snapshot();
+      final encoded = jsonEncode(snapshot);
+      if (encoded == _lastSnapshot) return;
+      _lastSnapshot = encoded;
+      final tasks = <DownloadTask>[];
+      final completed = <DownloadHistoryItem>[];
+      for (final raw in snapshot) {
+        final data = Map<String, dynamic>.from(raw as Map);
+        final task = DownloadTask(
+          id: data['id'] as String,
+          videoId: data['videoId'] as String? ?? '',
+          title: data['title'] as String? ?? 'Video',
+          thumbnailUrl: data['thumbnailUrl'] as String? ?? '',
+          youtubeUrl: data['url'] as String,
+          filePath: data['filePath'] as String? ?? '',
+          status: DownloadStatus.values.firstWhere(
+            (s) => s.name == data['status'],
+            orElse: () => DownloadStatus.failed,
+          ),
+          progress: ((data['progress'] as num?)?.toDouble() ?? 0).clamp(0, 1),
+          errorMessage: data['error'] as String?,
+        );
+        task.downloadedBytes = (data['downloadedBytes'] as num?)?.toInt() ?? 0;
+        task.totalBytes = (data['totalBytes'] as num?)?.toInt() ?? 0;
+        task.currentSpeed = (data['speed'] as num?)?.toDouble() ?? 0;
+        if (task.status == DownloadStatus.completed) {
+          completed.add(
+            DownloadHistoryItem(
+              id: task.id,
+              videoId: task.videoId,
+              title: task.title,
+              youtubeUrl: task.youtubeUrl,
+              thumbnailUrl: task.thumbnailUrl,
+              filePath: task.filePath,
+              downloadDate: DateTime.fromMillisecondsSinceEpoch(
+                (data['completedAt'] as num?)?.toInt() ?? 0,
+              ),
+              fileExists: data['fileExists'] as bool? ?? true,
+            ),
+          );
+        } else if (task.status != DownloadStatus.cancelled) {
+          tasks.add(task);
+        }
+      }
+      completed.sort((a, b) => b.downloadDate.compareTo(a.downloadDate));
+      _tasks
+        ..clear()
+        ..addAll(tasks);
+      _nativeHistory
+        ..clear()
+        ..addAll(completed);
+      if (_tasks.any(
+        (task) =>
+            task.status == DownloadStatus.downloading ||
+            task.status == DownloadStatus.queued,
+      )) {
+        if (_poller?.isActive != true) _startPolling();
+      } else {
+        _poller?.cancel();
+      }
+      notifyListeners();
+    } catch (e) {
+      debugPrint('Could not refresh downloads: $e');
+    } finally {
+      _refreshing = false;
+    }
   }
 
   Future<void> startLegacyDownload(String url) async {
-    final (_, streams) = await _youtubeService.getAvailableStreams(url);
-    final muxed = streams.where((s) => s.type == StreamType.muxed).toList();
-    if (muxed.isEmpty) {
-      throw Exception('No muxed streams available for download');
-    }
-    await startDownload(url, muxed.first);
+    final (_, streams) = await YoutubeService().getAvailableStreams(url);
+    await startDownload(url, streams.first);
   }
 
-  Future<void> startDownload(String url, StreamInfoItem selectedStream) async {
-    // We now rely on the disk file check below to prevent duplicates,
-    // which correctly differentiates between .mp4 and .m4a versions of the same video.
-
-    // if task is already downloading
-    if (_activeDownloads.values.any(
-      (task) =>
-          task.youtubeUrl == url &&
-          task.status != DownloadStatus.failed &&
-          task.status != DownloadStatus.cancelled,
-    )) {
-      throw Exception('Already downloading this video.');
-    }
-
-    final video = await _youtubeService.getVideoInfo(url);
-    final streamData = _youtubeService
-        .getYoutubeExplode()
-        .videos
-        .streamsClient
-        .get(selectedStream.streamInfo);
-
-    final videosDir = Directory(YoutubeService.publicDownloadDir);
-    if (!await videosDir.exists()) {
-      await videosDir.create(recursive: true);
-    }
-
-    // ponytail: use correct playable extensions for audio-only downloads.
-    // youtube_explode returns container 'mp4' for AAC audio → save as .m4a
-    // youtube_explode returns container 'webm' for Opus audio → save as .webm (or .ogg)
-    final String ext;
-    if (selectedStream.type == StreamType.audioOnly) {
-      final container = selectedStream.container.toLowerCase();
-      ext = container == 'mp4' ? '.m4a' : '.$container';
-    } else {
-      ext = '.mp4';
-    }
-
-    final sanitizedTitle = video.title
-        .replaceAll(RegExp(r'[<>:"/\\|?*]'), '_')
-        .substring(0, video.title.length.clamp(0, 80));
-    final filePath = '${videosDir.path}/${video.id}_$sanitizedTitle$ext';
-    final file = File(filePath);
-    
-    // ponytail: check disk directly to prevent duplicates even if history was cleared.
-    if (await file.exists()) {
-      throw Exception('File already exists on disk.');
-    }
-
-    final fileSink = file.openWrite();
-
-    final task = DownloadTask(
-      videoId: video.id.value,
-      title: video.title,
-      thumbnailUrl: video.thumbnails.highResUrl,
-      youtubeUrl: url,
-      filePath: filePath,
-      status: DownloadStatus.downloading,
-    );
-    task.totalBytes = selectedStream.sizeBytes;
-
-    _activeDownloads[task.id] = task;
-    _sinks[task.id] = fileSink;
-    
-    // Enable background
-    try {
-      if (!FlutterBackground.isBackgroundExecutionEnabled) {
-        const androidConfig = FlutterBackgroundAndroidConfig(
-          notificationTitle: "MediaStreamer Downloading",
-          notificationText: "Downloading files in background",
-          notificationImportance: AndroidNotificationImportance.normal,
-          notificationIcon: AndroidResource(name: 'launcher_icon', defType: 'mipmap'),
-        );
-        await FlutterBackground.initialize(androidConfig: androidConfig);
-        await FlutterBackground.enableBackgroundExecution();
-      }
-    } catch (_) {}
-    
-    notifyListeners();
-
-    var lastSpeedCalcTime = DateTime.now();
-    var lastSpeedCalcBytes = 0;
-
-    final sub = streamData.listen(
-      (chunk) {
-        fileSink.add(chunk);
-        task.downloadedBytes += chunk.length;
-        task.progress = task.downloadedBytes / task.totalBytes;
-
-        final now = DateTime.now();
-        final elapsed = now.difference(lastSpeedCalcTime).inMilliseconds;
-        if (elapsed >= 500) {
-          final bytesSinceLastCalc = task.downloadedBytes - lastSpeedCalcBytes;
-          task.currentSpeed = bytesSinceLastCalc / (elapsed / 1000);
-          lastSpeedCalcTime = now;
-          lastSpeedCalcBytes = task.downloadedBytes;
-
-          DownloadNotificationService.showProgress(
-            id: task.id.hashCode,
-            title: task.title,
-            progress: (task.progress * 100).toInt(),
-            body:
-                '${(task.currentSpeed / 1024 / 1024).toStringAsFixed(2)} MB/s',
-          );
-          notifyListeners();
-        }
-      },
-      onDone: () async {
-        await fileSink.flush();
-        await fileSink.close();
-        _sinks.remove(task.id);
-        _subscriptions.remove(task.id);
-
-        task.status = DownloadStatus.completed;
-        task.progress = 1.0;
-
-        DownloadNotificationService.showComplete(
-          id: task.id.hashCode,
-          title: task.title,
-          filePath: task.filePath,
-        );
-        YoutubeService.scanMediaStore(task.filePath);
-
-        _addToHistory(task);
-        _activeDownloads.remove(task.id);
-        _disableBackgroundIfNeeded();
-        notifyListeners();
-      },
-      onError: (e) async {
-        await fileSink.flush();
-        await fileSink.close();
-        _sinks.remove(task.id);
-        _subscriptions.remove(task.id);
-
-        task.status = DownloadStatus.failed;
-        task.errorMessage = e.toString();
-
-        DownloadNotificationService.showFailed(
-          id: task.id.hashCode,
-          title: task.title,
-          error: e.toString(),
-        );
-        _disableBackgroundIfNeeded();
-        notifyListeners();
-      },
-      cancelOnError: true,
-    );
-
-    _subscriptions[task.id] = sub;
-  }
-
-  void _disableBackgroundIfNeeded() {
-    if (_activeDownloads.isEmpty) {
-      try {
-        if (FlutterBackground.isBackgroundExecutionEnabled) {
-          FlutterBackground.disableBackgroundExecution();
-        }
-      } catch (_) {}
-    }
+  Future<void> startDownload(String url, StreamInfoItem stream) async {
+    await _native.enqueue({
+      'url': MediaUrl.require(url),
+      'format': stream.formatId,
+      'title': stream.title,
+      'videoId': stream.videoId,
+      'thumbnailUrl': stream.thumbnailUrl,
+    });
+    await refresh();
   }
 
   Future<void> startGenericDownload(String url, String fileName) async {
-    // Check for duplicates
-    if (_activeDownloads.values.any(
-      (task) =>
-          task.youtubeUrl == url &&
-          task.status != DownloadStatus.failed &&
-          task.status != DownloadStatus.cancelled,
-    )) {
-      throw Exception('Already downloading this file.');
+    await _native.enqueue({
+      'url': MediaUrl.require(url),
+      'format': 'best',
+      'title': fileName,
+    });
+    await refresh();
+  }
+
+  Future<void> _command(String command, String id) async {
+    await _native.command(command, id);
+    await refresh();
+  }
+
+  Future<void> pauseDownload(String id) => _command('pause', id);
+  Future<void> resumeDownload(String id) => _command('resume', id);
+  Future<void> cancelDownload(String id) => _command('cancel', id);
+
+  Future<void> removeHistoryItem(String id) async {
+    if (_legacyHistory.any((item) => item.id == id)) {
+      _legacyHistory.removeWhere((item) => item.id == id);
+      await _saveLegacyHistory();
+      notifyListeners();
+    } else {
+      await _command('removeHistory', id);
     }
+  }
 
-    final videosDir = Directory(YoutubeService.publicDownloadDir);
-    if (!await videosDir.exists()) {
-      await videosDir.create(recursive: true);
-    }
-
-    final sanitizedTitle = fileName
-        .replaceAll(RegExp(r'[<>:"/\\|?*]'), '_')
-        .substring(0, fileName.length.clamp(0, 80));
-    final filePath = '${videosDir.path}/$sanitizedTitle';
-    final file = File(filePath);
-    final fileSink = file.openWrite();
-
-    final task = DownloadTask(
-      videoId: 'generic_${DateTime.now().millisecondsSinceEpoch}',
-      title: sanitizedTitle,
-      thumbnailUrl: '', // No thumbnail for generic files
-      youtubeUrl: url,
-      filePath: filePath,
-      status: DownloadStatus.downloading,
+  Future<void> _saveLegacyHistory() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList(
+      'download_history',
+      _legacyHistory.map((item) => jsonEncode(item.toJson())).toList(),
     );
-
-    _activeDownloads[task.id] = task;
-    _sinks[task.id] = fileSink;
-    
-    try {
-      if (!FlutterBackground.isBackgroundExecutionEnabled) {
-        await FlutterBackground.enableBackgroundExecution();
-      }
-    } catch (_) {}
-    
-    notifyListeners();
-
-    try {
-      final request = await HttpClient().getUrl(Uri.parse(url));
-      final response = await request.close();
-      task.totalBytes = response.contentLength > 0 ? response.contentLength : 0;
-
-      var lastSpeedCalcTime = DateTime.now();
-      var lastSpeedCalcBytes = 0;
-
-      final sub = response.listen(
-        (chunk) {
-          fileSink.add(chunk);
-          task.downloadedBytes += chunk.length;
-          if (task.totalBytes > 0) {
-            task.progress = task.downloadedBytes / task.totalBytes;
-          }
-
-          final now = DateTime.now();
-          final elapsed = now.difference(lastSpeedCalcTime).inMilliseconds;
-          if (elapsed >= 500) {
-            final bytesSinceLastCalc =
-                task.downloadedBytes - lastSpeedCalcBytes;
-            task.currentSpeed = bytesSinceLastCalc / (elapsed / 1000);
-            lastSpeedCalcTime = now;
-            lastSpeedCalcBytes = task.downloadedBytes;
-
-            DownloadNotificationService.showProgress(
-              id: task.id.hashCode,
-              title: task.title,
-              progress: task.totalBytes > 0
-                  ? (task.progress * 100).toInt()
-                  : -1,
-              body:
-                  '${(task.currentSpeed / 1024 / 1024).toStringAsFixed(2)} MB/s',
-            );
-            notifyListeners();
-          }
-        },
-        onDone: () async {
-          await fileSink.flush();
-          await fileSink.close();
-          _sinks.remove(task.id);
-          _subscriptions.remove(task.id);
-
-          task.status = DownloadStatus.completed;
-          task.progress = 1.0;
-
-          DownloadNotificationService.showComplete(
-            id: task.id.hashCode,
-            title: task.title,
-            filePath: task.filePath,
-          );
-          YoutubeService.scanMediaStore(task.filePath);
-
-          _addToHistory(task);
-          _activeDownloads.remove(task.id);
-          _disableBackgroundIfNeeded();
-          notifyListeners();
-        },
-        onError: (e) async {
-          await fileSink.flush();
-          await fileSink.close();
-          _sinks.remove(task.id);
-          _subscriptions.remove(task.id);
-
-          task.status = DownloadStatus.failed;
-          task.errorMessage = e.toString();
-
-          DownloadNotificationService.showFailed(
-            id: task.id.hashCode,
-            title: task.title,
-            error: e.toString(),
-          );
-          _disableBackgroundIfNeeded();
-          notifyListeners();
-        },
-        cancelOnError: true,
-      );
-
-      _subscriptions[task.id] = sub;
-    } catch (e) {
-      await fileSink.flush();
-      await fileSink.close();
-      _sinks.remove(task.id);
-
-      task.status = DownloadStatus.failed;
-      task.errorMessage = e.toString();
-
-      DownloadNotificationService.showFailed(
-        id: task.id.hashCode,
-        title: task.title,
-        error: e.toString(),
-      );
-      _disableBackgroundIfNeeded();
-      notifyListeners();
-    }
-  }
-
-  void pauseDownload(String id) {
-    if (_subscriptions.containsKey(id)) {
-      _subscriptions[id]?.pause();
-      if (_activeDownloads.containsKey(id)) {
-        _activeDownloads[id]!.status = DownloadStatus.paused;
-        DownloadNotificationService.showProgress(
-          id: id.hashCode,
-          title: _activeDownloads[id]!.title,
-          progress: (_activeDownloads[id]!.progress * 100).toInt(),
-          body: 'Paused',
-        );
-        notifyListeners();
-      }
-    }
-  }
-
-  void resumeDownload(String id) {
-    if (_subscriptions.containsKey(id)) {
-      _subscriptions[id]?.resume();
-      if (_activeDownloads.containsKey(id)) {
-        _activeDownloads[id]!.status = DownloadStatus.downloading;
-        notifyListeners();
-      }
-    }
-  }
-
-  Future<void> cancelDownload(String id) async {
-    if (_subscriptions.containsKey(id)) {
-      await _subscriptions[id]?.cancel();
-      _subscriptions.remove(id);
-    }
-    if (_sinks.containsKey(id)) {
-      await _sinks[id]?.close();
-      _sinks.remove(id);
-    }
-    if (_activeDownloads.containsKey(id)) {
-      final task = _activeDownloads[id]!;
-      task.status = DownloadStatus.cancelled;
-      DownloadNotificationService.cancel(task.id.hashCode);
-
-      // Remove partial file
-      final file = File(task.filePath);
-      if (await file.exists()) {
-        await file.delete();
-      }
-
-      _activeDownloads.remove(id);
-      _disableBackgroundIfNeeded();
-      notifyListeners();
-    }
   }
 
   Future<void> deleteHistoryFile(String id) async {
-    final itemIndex = _history.indexWhere((item) => item.id == id);
-    if (itemIndex != -1) {
-      final item = _history[itemIndex];
-      final file = File(item.filePath);
-      if (await file.exists()) {
-        await file.delete();
-      }
-      item.fileExists = false;
-      await _saveHistory();
+    final legacy = _legacyHistory.where((item) => item.id == id).firstOrNull;
+    if (legacy != null) {
+      final file = File(legacy.filePath);
+      if (await file.exists()) await file.delete();
+      legacy.fileExists = false;
+      await _saveLegacyHistory();
       notifyListeners();
+    } else {
+      await _command('deleteFile', id);
     }
   }
 
   Future<void> checkExistingFiles() async {
-    bool changed = false;
-    for (var item in _history) {
-      bool exists = await File(item.filePath).exists();
-      if (item.fileExists != exists) {
-        item.fileExists = exists;
-        changed = true;
-      }
+    for (final item in _legacyHistory) {
+      item.fileExists = await File(item.filePath).exists();
     }
-    if (changed) {
-      await _saveHistory();
-      notifyListeners();
-    }
+    await refresh();
   }
 }

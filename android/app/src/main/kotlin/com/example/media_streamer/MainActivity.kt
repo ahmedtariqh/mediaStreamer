@@ -11,6 +11,9 @@ import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 
 class MainActivity : FlutterActivity() {
+    private var playbackBridge: PlaybackBridge? = null
+    private var downloadChannel: DownloadChannel? = null
+    private val mediaWorker = java.util.concurrent.Executors.newSingleThreadExecutor()
     private val VIEW_CHANNEL = "com.mediastreamer/view_intent"
     private val MEDIA_STORE_CHANNEL = "com.mediastreamer/media_store"
     private val MEDIA_QUERY_CHANNEL = "com.mediastreamer/media_query"
@@ -23,6 +26,8 @@ class MainActivity : FlutterActivity() {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        downloadChannel = DownloadChannel(this, flutterEngine)
+        playbackBridge = PlaybackBridge(this, flutterEngine)
 
         // View intent channel — open files from external apps
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, VIEW_CHANNEL)
@@ -43,9 +48,8 @@ class MainActivity : FlutterActivity() {
                     "scanFile" -> {
                         val filePath = call.arguments as? String
                         if (filePath != null) {
-                            MediaScannerConnection.scanFile(
-                                this, arrayOf(filePath), null
-                            ) { _, _ -> }
+                            MediaScannerConnection.scanFile(this, arrayOf(filePath), null) { _, _ ->
+                            }
                             result.success(true)
                         } else {
                             result.error("INVALID_ARG", "File path is null", null)
@@ -62,16 +66,51 @@ class MainActivity : FlutterActivity() {
                     "queryMedia" -> {
                         val includeVideo = call.argument<Boolean>("includeVideo") ?: true
                         val includeAudio = call.argument<Boolean>("includeAudio") ?: true
-                        try {
-                            val mediaFiles = queryAllMedia(includeVideo, includeAudio)
-                            result.success(mediaFiles)
-                        } catch (e: Exception) {
-                            result.error("QUERY_ERROR", e.message, null)
+                        mediaWorker.execute {
+                            try {
+                                val mediaFiles = queryAllMedia(includeVideo, includeAudio)
+                                runOnUiThread { result.success(mediaFiles) }
+                            } catch (e: Exception) {
+                                runOnUiThread { result.error("QUERY_ERROR", e.message, null) }
+                            }
                         }
                     }
                     else -> result.notImplemented()
                 }
             }
+    }
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray,
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        downloadChannel?.onPermissionResult(requestCode, grantResults)
+    }
+
+    override fun onDestroy() {
+        playbackBridge?.dispose()
+        mediaWorker.shutdown()
+        super.onDestroy()
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        if (playbackBridge?.onActivityResult(requestCode, resultCode, data) == true) return
+        super.onActivityResult(requestCode, resultCode, data)
+    }
+
+    override fun onPictureInPictureModeChanged(
+        value: Boolean,
+        config: android.content.res.Configuration,
+    ) {
+        super.onPictureInPictureModeChanged(value, config)
+        playbackBridge?.pipChanged(value)
+    }
+
+    override fun onUserLeaveHint() {
+        super.onUserLeaveHint()
+        playbackBridge?.autoPip()
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -95,24 +134,25 @@ class MainActivity : FlutterActivity() {
     }
 
     /**
-     * Query MediaStore for all video and audio files on the device.
-     * Returns a list of maps with path, name, size, modified, isVideo.
+     * Query MediaStore for all video and audio files on the device. Returns a list of maps with
+     * path, name, size, modified, isVideo.
      */
-    private fun queryAllMedia(includeVideo: Boolean, includeAudio: Boolean): List<Map<String, Any?>> {
+    private fun queryAllMedia(
+        includeVideo: Boolean,
+        includeAudio: Boolean,
+    ): List<Map<String, Any?>> {
         val results = mutableListOf<Map<String, Any?>>()
 
         if (includeVideo) {
-            queryMediaStore(
-                MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
-                true
-            )?.let { results.addAll(it) }
+            queryMediaStore(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, true)?.let {
+                results.addAll(it)
+            }
         }
 
         if (includeAudio) {
-            queryMediaStore(
-                MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
-                false
-            )?.let { results.addAll(it) }
+            queryMediaStore(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, false)?.let {
+                results.addAll(it)
+            }
         }
 
         // Sort by date modified descending (newest first)
@@ -121,24 +161,33 @@ class MainActivity : FlutterActivity() {
     }
 
     private fun queryMediaStore(uri: Uri, isVideo: Boolean): List<Map<String, Any?>>? {
-        val projection = arrayOf(
-            MediaStore.MediaColumns.DATA,
-            MediaStore.MediaColumns.DISPLAY_NAME,
-            MediaStore.MediaColumns.SIZE,
-            MediaStore.MediaColumns.DATE_MODIFIED,
-        )
+        val projection =
+            arrayOf(
+                MediaStore.MediaColumns._ID,
+                MediaStore.MediaColumns.TITLE,
+                MediaStore.MediaColumns.DATE_ADDED,
+                "duration",
+                *if (isVideo) emptyArray<String>() else arrayOf("artist", "album"),
+                *if (!isVideo && android.os.Build.VERSION.SDK_INT >= 30) arrayOf("genre")
+                else emptyArray<String>(),
+                MediaStore.MediaColumns.DATA,
+                MediaStore.MediaColumns.DISPLAY_NAME,
+                MediaStore.MediaColumns.SIZE,
+                MediaStore.MediaColumns.DATE_MODIFIED,
+            )
 
         val results = mutableListOf<Map<String, Any?>>()
         var cursor: Cursor? = null
 
         try {
-            cursor = contentResolver.query(
-                uri,
-                projection,
-                null,
-                null,
-                "${MediaStore.MediaColumns.DATE_MODIFIED} DESC"
-            )
+            cursor =
+                contentResolver.query(
+                    uri,
+                    projection,
+                    null,
+                    null,
+                    "${MediaStore.MediaColumns.DATE_MODIFIED} DESC",
+                )
 
             cursor?.use {
                 val pathIndex = it.getColumnIndex(MediaStore.MediaColumns.DATA)
@@ -153,13 +202,34 @@ class MainActivity : FlutterActivity() {
                     val modified = if (modifiedIndex >= 0) it.getLong(modifiedIndex) else 0L
 
                     if (path != null && name != null) {
-                        results.add(mapOf(
-                            "path" to path,
-                            "name" to name,
-                            "size" to size.toInt(),
-                            "modified" to modified,
-                            "isVideo" to isVideo,
-                        ))
+                        results.add(
+                            mapOf(
+                                "path" to path,
+                                "name" to name,
+                                "size" to size,
+                                "modified" to modified,
+                                "isVideo" to isVideo,
+                                "contentUri" to
+                                    android.content.ContentUris.withAppendedId(
+                                            uri,
+                                            it.getLong(it.getColumnIndexOrThrow("_id")),
+                                        )
+                                        .toString(),
+                                "title" to it.getString(it.getColumnIndexOrThrow("title")),
+                                "duration" to it.getLong(it.getColumnIndexOrThrow("duration")),
+                                "added" to
+                                    it.getLong(it.getColumnIndexOrThrow("date_added")) * 1000,
+                                "artist" to
+                                    if (isVideo) ""
+                                    else it.getString(it.getColumnIndexOrThrow("artist")),
+                                "genre" to
+                                    if (isVideo || android.os.Build.VERSION.SDK_INT < 30) ""
+                                    else it.getString(it.getColumnIndexOrThrow("genre")),
+                                "album" to
+                                    if (isVideo) ""
+                                    else it.getString(it.getColumnIndexOrThrow("album")),
+                            )
+                        )
                     }
                 }
             }
@@ -179,19 +249,13 @@ class MainActivity : FlutterActivity() {
 
         if (uri.scheme == "content") {
             try {
-                val projection = arrayOf(MediaStore.MediaColumns.DATA)
-                contentResolver.query(uri, projection, null, null, null)?.use { cursor ->
-                    if (cursor.moveToFirst()) {
-                        val idx = cursor.getColumnIndex(MediaStore.MediaColumns.DATA)
-                        if (idx >= 0) {
-                            return cursor.getString(idx)
-                        }
-                    }
-                }
+                contentResolver.takePersistableUriPermission(
+                    uri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION,
+                )
             } catch (_: Exception) {}
-            return uri.path
+            return uri.toString()
         }
-
-        return uri.path
+        return uri.toString()
     }
 }
